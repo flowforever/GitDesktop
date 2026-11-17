@@ -267,6 +267,13 @@ Whether a push publishes or would CREATE its branch on the remote reads
 `!upstream || upstreamGone`; a local upstream (remote `.` or null in the
 branch list) is `isLocalUpstream` from the same module.
 
+**MR document tabs.** Identity is host + full project path + MR IID. Mount only
+the active repository context, and keep its text drafts under
+`MrDocumentDraftScope` with `useMrScopedDraft` / `useMrScopedKeyedDraft`.
+Activate cached documents through `activateWorkDocument`, which revalidates the
+checkout's origin and shares the repository-open claim with every other opener.
+Clone continuations retain that claim through their awaits and retire on close.
+
 **Command palette.** Any new tab/surface/action needs an ACTIONS entry in
 `src/lib/hotkeys/registry.ts` + `useHotkeyAction` wiring in the same change
 (`defaultBinding: null` = palette-only). Missed twice before. Labels use the

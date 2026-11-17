@@ -204,6 +204,7 @@ const LOCAL_CALLEES = [
 /** Network writes named individually: git commands that fetch, push or run a
  *  networked tool, and anything a local family would otherwise claim. */
 const NETWORK_CALLEES = [
+  "gitlabWorkTodoDone",
   "gitFetch",
   "gitFetchRemote",
   "gitPull",

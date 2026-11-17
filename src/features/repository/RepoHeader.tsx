@@ -24,8 +24,8 @@ export function RepoHeader({ repoPath }: { repoPath: string }) {
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label="Back to repositories"
-        title="Back to repositories"
+        aria-label="Back to My works"
+        title="Back to My works"
         onClick={closeRepo}
       >
         <ArrowLeftIcon />

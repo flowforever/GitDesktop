@@ -1,6 +1,6 @@
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { Markdown } from "@/components/markdown/markdown";
 import { hostedImagesFor } from "@/components/markdown/markdown-images";
@@ -22,6 +22,7 @@ import type { MinimizeReason } from "@/lib/git/api";
 import { displayLogin } from "@/lib/git/bot-login";
 import { useActiveForgeGhHost, useActiveGhHost } from "@/lib/git/host";
 import type { PrThreadOut, Reaction, RepoLabel } from "@/lib/git/types";
+import { useMrScopedDraft } from "@/lib/pulls/mr-document-drafts";
 import { CommentEditor } from "./CommentEditor";
 import { ReactionBar } from "./ReactionBar";
 import type { MentionSource } from "./useMentionCandidates";
@@ -155,8 +156,12 @@ export function Thread({
   mentions?: MentionSource;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft, scopedDraft] = useMrScopedDraft(`edit|${thread.id}`);
   const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (scopedDraft && !editing && draft && draft.trim() === thread.body.trim())
+      setDraft("");
+  }, [scopedDraft, editing, draft, thread.body, setDraft]);
   const minimized = thread.isMinimized;
   const disabledSuffix = disabledReason ? ` — ${disabledReason}` : "";
   return (
@@ -222,7 +227,7 @@ export function Thread({
                 {onSaveEdit && (
                   <DropdownMenuItem
                     onClick={() => {
-                      setDraft(thread.body);
+                      if (!scopedDraft || !draft) setDraft(thread.body);
                       setEditing(true);
                     }}
                   >
@@ -285,7 +290,10 @@ export function Thread({
             onSaveEdit?.(draft.trim());
             setEditing(false);
           }}
-          onCancel={() => setEditing(false)}
+          onCancel={() => {
+            setDraft("");
+            setEditing(false);
+          }}
           textareaClassName="max-h-48 min-h-16 resize-y font-mono"
           mentions={mentions}
           hostedImages={hostedImagesFor(

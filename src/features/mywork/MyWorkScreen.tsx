@@ -1,9 +1,9 @@
 import {
-  ArrowLeftIcon,
   ArrowSquareOutIcon,
   ArrowsClockwiseIcon,
   CircleDashedIcon,
   CircleNotchIcon,
+  FolderPlusIcon,
   GitPullRequestIcon,
 } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -14,7 +14,6 @@ import {
   type MouseEvent as ReactMouseEvent,
   useEffect,
   useEffectEvent,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -46,7 +45,13 @@ import { composedErrorPresentation, presentError } from "@/lib/error-summary";
 import { rateLimitSummary } from "@/lib/forge-backoff";
 import { forgePrHeadRef, repoOriginPath, validateRepo } from "@/lib/git/api";
 import { normPath } from "@/lib/git/path";
-import { useForgeMyWork, useMyWorkSources } from "@/lib/git/queries";
+import {
+  useCompleteWorkTodo,
+  useGitLabWorkAccounts,
+  useGitLabWorkHosts,
+  useGitLabWorkItems,
+  useGitLabWorkTodos,
+} from "@/lib/git/queries/gitlab-work";
 import {
   type ForgeProvider,
   type MyWorkItem,
@@ -55,29 +60,36 @@ import {
   type RepoInfo,
   type RepoOrigin,
 } from "@/lib/git/types";
+import type { WorkCategory } from "@/lib/git/types/gitlab-work";
 import { listUserWorktrees, type UserWorktree } from "@/lib/git/worktree";
+import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { applyRepoLens } from "@/lib/repo-lens/queries";
 import type { RecentRepo } from "@/lib/settings/api";
 import { useSettings } from "@/lib/settings/queries";
 import { useErrorDialog } from "@/lib/stores/error-dialog";
 import { useUiStore } from "@/lib/stores/ui";
+import { documentId } from "@/lib/stores/work-documents";
 import { isAppError } from "@/lib/tauri/invoke";
 import { parseableDate } from "@/lib/time";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { ConnectWorkRepoDialog } from "./ConnectWorkRepoDialog";
 import {
   filterMyWork,
   MY_WORK_LISTBOX_ID,
-  type MyWorkTab,
   matchLocalRepos,
   mergeMyWorkPages,
   myWorkOptionId,
 } from "./mywork-utils";
+import { TeamLabelsDialog } from "./TeamLabelsDialog";
+import { WorkTodosList } from "./WorkTodosList";
+import { WORK_CATEGORIES } from "./work-categories";
 
 /** Stable empty default, so a settings read that hasn't landed doesn't hand a
  *  fresh array to every render. */
 const NO_RECENTS: RecentRepo[] = [];
+const NO_LABELS: string[] = [];
 
 // Per-provider copy as Records rather than ternary chains, so adding a forge is
 // one entry per surface and no sentence can silently keep another's wording.
@@ -125,23 +137,6 @@ const SIGN_IN_KINDS = new Set([
  *  false internally, so reaching this means the IPC call itself didn't land. */
 const SOURCES_NOTICE = "Couldn't check which forges are connected.";
 
-/** Which forges answer account-wide. Bitbucket has no cross-repo search, so its
- *  leg is asked per opened checkout and must never ride a claim about every repo
- *  you're involved in. */
-const ACCOUNT_WIDE: Record<ForgeProvider, boolean> = {
-  github: true,
-  gitlab: true,
-  bitbucket: false,
-};
-
-/** The empty state's second sentence when exactly one forge is configured. */
-const EMPTY_SCOPE: Record<ForgeProvider, string> = {
-  github: "This searches every repo you're involved in, not just local ones.",
-  gitlab:
-    "This searches every project you're involved in, not just local ones.",
-  bitbucket: "This searches the Bitbucket repositories you've opened here.",
-};
-
 /** Every provider id, as an exhaustive Record so widening `ForgeProvider` fails
  *  the build here rather than quietly narrowing the check below. */
 const FORGE_PROVIDERS: Record<ForgeProvider, true> = {
@@ -160,39 +155,12 @@ function asForgeProvider(value: string | undefined): ForgeProvider | null {
     : null;
 }
 
-/** "A" / "A and B" — the configured set is at most three. */
-const joinLabels = (labels: string[]) =>
-  labels.length > 1
-    ? `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`
-    : labels[0];
-
-/** What the configured legs actually cover, so an empty inbox never claims a
- *  reach it doesn't have. One forge speaks for itself; a mix names which part is
- *  account-wide and which is bounded by the checkouts you've opened. */
-function scopeSentence(providers: ForgeProvider[]): string {
-  if (providers.length === 1) return EMPTY_SCOPE[providers[0]];
-  const wide = providers.filter((p) => ACCOUNT_WIDE[p]).map(providerLabel);
-  const scoped = providers.filter((p) => !ACCOUNT_WIDE[p]).map(providerLabel);
-  const parts: string[] = [];
-  if (wide.length > 0) {
-    parts.push(
-      `${joinLabels(wide)} ${wide.length > 1 ? "cover" : "covers"} every repo you're involved in, not just local ones.`,
-    );
-  }
-  if (scoped.length > 0) {
-    parts.push(
-      `${joinLabels(scoped)} ${scoped.length > 1 ? "cover" : "covers"} the repositories you've opened here.`,
-    );
-  }
-  return parts.join(" ");
-}
-
 /** One provider's slice of the inbox: whether it is configured at all, and the
  *  query carrying its rows. */
 type MyWorkLeg = {
   provider: ForgeProvider;
   enabled: boolean;
-  query: ReturnType<typeof useForgeMyWork>;
+  query: ReturnType<typeof useGitLabWorkItems>;
 };
 
 /** Which provider a failure came from, or null for the sources probe itself. */
@@ -537,11 +505,21 @@ function openRowContextMenu(url: string): void {
  * and to the browser when it isn't. Palette-reachable and launched from the
  * Welcome screen; Back / Esc return to the previous view.
  */
-export function MyWorkScreen() {
+export function MyWorkScreen({ active = true }: { active?: boolean }) {
   const closeMyWork = useUiStore((s) => s.closeMyWork);
+  const openRepositories = useUiStore((s) => s.openRepositories);
+  const openSettings = useUiStore((s) => s.openSettings);
+  const openHelp = useUiStore((s) => s.openHelp);
+  const category = useUiStore((s) => s.workCategory);
+  const setCategory = useUiStore((s) => s.setWorkCategory);
+  const [labelsOpen, setLabelsOpen] = useState(false);
+  const [connectItem, setConnectItem] = useState<MyWorkItem | null>(null);
+  useHotkeyAction("work-configure-labels", () => {
+    setCategory("team");
+    setLabelsOpen(true);
+  });
   const openPr = useUiStore((s) => s.openPr);
   const openIssue = useUiStore((s) => s.openIssue);
-  const [tab, setTab] = useState<MyWorkTab>("all");
   const [filter, setFilter] = useState("");
   // The active row is tracked by URL (unique per item) rather than by index, so
   // a filter change can't silently retarget the selection to a different item.
@@ -566,21 +544,30 @@ export function MyWorkScreen() {
   // (that cache's TTL is far shorter than the gap between opens). Filtering on
   // the stored `provider` here would instead hide Bitbucket work forever for
   // anyone who never opens the repo list that backfills it.
-  const sources = useMyWorkSources(true);
-  const recentPaths = useMemo(
-    () => recents.map((r) => r.path).sort(),
-    [recents],
-  );
-  const githubOn = sources.data?.github === true;
+  const hosts = useGitLabWorkHosts(active);
+  const sources = {
+    ...hosts,
+    data: hosts.data ? { gitlab: hosts.data.length > 0 } : undefined,
+  };
   const gitlabOn = sources.data?.gitlab === true;
-  const bitbucketOn = sources.data?.bitbucket === true;
-  const github = useForgeMyWork("github", githubOn);
-  const gitlab = useForgeMyWork("gitlab", gitlabOn);
-  const bitbucket = useForgeMyWork("bitbucket", bitbucketOn, recentPaths);
+  const accounts = useGitLabWorkAccounts(active && gitlabOn);
+  const teamLabels = settings.data?.myWorkTeamLabels ?? NO_LABELS;
+  const gitlab = useGitLabWorkItems(
+    category === "todos" ? "mine" : category,
+    teamLabels,
+    active && gitlabOn && category !== "todos",
+  );
+  const todos = useGitLabWorkTodos(active && gitlabOn && category === "todos");
+  const completeTodo = useCompleteWorkTodo();
   const legs: MyWorkLeg[] = [
-    { provider: "github", enabled: githubOn, query: github },
-    { provider: "gitlab", enabled: gitlabOn, query: gitlab },
-    { provider: "bitbucket", enabled: bitbucketOn, query: bitbucket },
+    {
+      provider: "gitlab",
+      enabled:
+        gitlabOn &&
+        category !== "todos" &&
+        (category !== "team" || teamLabels.length > 0),
+      query: gitlab,
+    },
   ];
   const enabledLegs = legs.filter((l) => l.enabled);
   // The legs that actually ANSWERED. Only these may describe what an empty inbox
@@ -598,8 +585,7 @@ export function MyWorkScreen() {
   const pendingGenRef = useRef(0);
 
   const items = page.items;
-  const prCount = items.filter((i) => i.isPullRequest).length;
-  const visible = filterMyWork(items, tab, filter);
+  const visible = filterMyWork(items, "all", filter);
 
   const anySettled = enabledLegs.some(settled);
   const allSettled = enabledLegs.every(settled);
@@ -610,7 +596,8 @@ export function MyWorkScreen() {
   // due on its FIRST render, and waiting for the effect would paint one
   // skeleton frame the single-query screen never had.
   const paintDue = !sourcesPending && allSettled;
-  const loading = !firstPaint && !paintDue;
+  const loading =
+    (!firstPaint && !paintDue) || (enabledLegs.length > 0 && gitlab.isPending);
   // The latch. A leg's settled state is monotonic within a mount, so the window
   // arms at most once — when the first forge answers — and is cleared again the
   // moment the rest catch up inside it. Latching even when `paintDue` already
@@ -645,14 +632,19 @@ export function MyWorkScreen() {
   // rendered rows would desync the header from the list it describes.
   const showCounts =
     !loading && (items.length > 0 || (allSettled && answeredLegs.length > 0));
-  const counts = showCounts
-    ? { all: items.length, prs: prCount, issues: items.length - prCount }
-    : { all: null, prs: null, issues: null };
   // Derived, never stored: a row the filter has hidden simply stops being
   // active, and arrow keys restart from the ends of the new visible set.
   const activeIndex = interactive.findIndex((i) => i.url === activeUrl);
   const activeId =
     activeIndex >= 0 ? myWorkOptionId(interactive[activeIndex].url) : undefined;
+  useHotkeyAction(
+    "work-open-selected",
+    () => {
+      const item = interactive[activeIndex];
+      if (item) void openItem(item);
+    },
+    category !== "todos" && activeIndex >= 0,
+  );
   // Only a total failure earns the error screen — one failed leg among several
   // is a quiet notice under the rows the rest supplied.
   const errors = failedLegs(
@@ -673,12 +665,16 @@ export function MyWorkScreen() {
     enabledLegs.some((l) => l.query.isPaused && !hasOwnData(l)) &&
     enabledLegs.every((l) => l.query.isPaused || settledNow(l));
   const refreshing =
-    sources.isFetching || enabledLegs.some((l) => l.query.isFetching);
+    sources.isFetching ||
+    enabledLegs.some((l) => l.query.isFetching) ||
+    (category === "todos" && todos.isFetching);
   // Refetches the sources probe too: a sign-in that landed while the inbox was
   // open only shows up as a newly configured leg.
   function refresh() {
     void sources.refetch();
+    if (gitlabOn) void accounts.refetch();
     for (const leg of enabledLegs) void leg.query.refetch();
+    if (category === "todos" && gitlabOn) void todos.refetch();
   }
 
   // Esc closes the inbox. Guarded so Base UI popups (which mark the event
@@ -712,7 +708,7 @@ export function MyWorkScreen() {
   // the branch actually is.
   async function openItem(
     item: MyWorkItem,
-    opts?: { preferWorktree?: boolean },
+    opts?: { preferWorktree?: boolean; connectedRepo?: RecentRepo },
   ) {
     // Claim the generation before any early return, so EVERY open — including
     // the browser arm, which never awaits — supersedes a pending one; a stale
@@ -721,12 +717,35 @@ export function MyWorkScreen() {
     // view change), so a continuation from a previous mount stays superseded;
     // the view is read live because the screen can be gone entirely.
     const gen = ++openGen;
+    if (
+      item.isPullRequest &&
+      !opts?.connectedRepo &&
+      opts?.preferWorktree !== false
+    ) {
+      const id = documentId({
+        host: item.host,
+        repoFullName: item.repoFullName,
+        number: item.number,
+      });
+      if (
+        useUiStore
+          .getState()
+          .workDocuments.documents.some((doc) => documentId(doc) === id)
+      ) {
+        useUiStore.getState().activateWorkDocument(id);
+        return;
+      }
+    }
     // The same set the row's affordances render from, so a local-looking row is
     // never one this refuses over a provider. Both open arms below start here,
     // so PRs and issues are gated alike.
-    const candidates = openableMatches(item, recents);
+    const candidates = openableMatches(
+      item,
+      opts?.connectedRepo ? [opts.connectedRepo, ...recents] : recents,
+    );
     if (candidates.length === 0) {
-      openUrl(item.url);
+      if (item.isPullRequest) setConnectItem(item);
+      else openUrl(item.url);
       return;
     }
     // Claimed here, before the first await but after the browser-only arm, so a
@@ -756,7 +775,8 @@ export function MyWorkScreen() {
       // proof rejects a dead path anyway, so only a row with nowhere else to
       // look reports it and gives up here.
       if (candidates.length === 1) {
-        openUrl(item.url);
+        if (item.isPullRequest) setConnectItem(item);
+        else openUrl(item.url);
         // Only a real notARepo earns the stale-path sentence — a missing CLI or
         // an IPC failure would be misdescribed by it, so it takes the generic
         // toast.
@@ -800,7 +820,8 @@ export function MyWorkScreen() {
         const proven = await provenCandidate(item, candidates, deadline);
         if (superseded()) return;
         if (!proven) {
-          openUrl(item.url);
+          if (item.isPullRequest) setConnectItem(item);
+          else openUrl(item.url);
           return;
         }
         // Everything below resolves against the PROVEN checkout, not the key's
@@ -904,6 +925,15 @@ export function MyWorkScreen() {
     if (item.isPullRequest) {
       openPr({
         kind: "remote",
+        document: {
+          host: item.host,
+          repoFullName: item.repoFullName,
+          number: item.number,
+          title: item.title,
+          url: item.url,
+          repoPath: targetPath,
+          repoName: targetName,
+        },
         repoPath: targetPath,
         repoName: targetName,
         ref: String(item.number),
@@ -935,6 +965,7 @@ export function MyWorkScreen() {
     onActivate: (item) => setActiveUrl(item.url),
   });
   function onInputKeyDown(e: ReactKeyboardEvent<HTMLInputElement>) {
+    if (category === "todos") return;
     if (e.key === "Enter") {
       const item = interactive[activeIndex];
       if (!item) return;
@@ -964,24 +995,31 @@ export function MyWorkScreen() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b px-3 py-2">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Back"
-          onClick={closeMyWork}
-        >
-          <ArrowLeftIcon />
-        </Button>
-        <span className="text-sm font-medium">My work</span>
+        <span className="text-sm font-medium">My works</span>
         {showCounts && (
           <span className="text-xs tabular-nums text-muted-foreground">
-            {items.length}
+            {category === "todos"
+              ? (todos.data?.items.length ?? "")
+              : items.length}
           </span>
         )}
         <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={openRepositories}
+        >
+          Repositories
+        </Button>
+        <Button variant="ghost" size="sm" onClick={openHelp}>
+          Help
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => openSettings()}>
+          Settings
+        </Button>
+        <Button
           variant="ghost"
           size="icon-sm"
-          className="ml-auto"
           aria-label="Refresh"
           title="Refresh"
           disabled={refreshing}
@@ -992,64 +1030,133 @@ export function MyWorkScreen() {
       </header>
 
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as MyWorkTab)}>
+        <Tabs
+          value={category}
+          onValueChange={(v) => setCategory(v as WorkCategory)}
+          className="max-w-full overflow-x-auto"
+        >
           <TabsList>
-            <TabsTrigger value="all">
-              All
-              <Count n={counts.all} />
-            </TabsTrigger>
-            <TabsTrigger value="prs">
-              Pull requests
-              <Count n={counts.prs} />
-            </TabsTrigger>
-            <TabsTrigger value="issues">
-              Issues
-              <Count n={counts.issues} />
-            </TabsTrigger>
+            {WORK_CATEGORIES.map(({ value, label }) => (
+              <TabsTrigger key={value} value={value}>
+                {label}
+                {value === category && (
+                  <Count
+                    n={
+                      category === "todos"
+                        ? (todos.data?.items.length ?? null)
+                        : showCounts
+                          ? items.length
+                          : null
+                    }
+                  />
+                )}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
+        {category === "team" && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setLabelsOpen(true)}
+          >
+            Configure labels
+            {teamLabels.length > 0 ? ` (${teamLabels.length})` : ""}
+          </Button>
+        )}
         <Input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={onInputKeyDown}
           placeholder="Filter by title, repository, or number"
           aria-label="Filter your work"
-          role="combobox"
-          aria-expanded={interactive.length > 0}
+          role={category === "todos" ? undefined : "combobox"}
+          aria-expanded={
+            category === "todos" ? undefined : interactive.length > 0
+          }
           // Same predicate as aria-expanded, and the same set the list renders:
           // the listbox only mounts in the list branch, so pointing at its id
           // from any other state — including the grace window's skeletons —
           // would reference a node that isn't there.
           aria-controls={
-            interactive.length > 0 ? MY_WORK_LISTBOX_ID : undefined
+            category !== "todos" && interactive.length > 0
+              ? MY_WORK_LISTBOX_ID
+              : undefined
           }
-          aria-autocomplete="list"
-          aria-activedescendant={activeId}
+          aria-autocomplete={category === "todos" ? undefined : "list"}
+          aria-activedescendant={category === "todos" ? undefined : activeId}
           className="h-8 min-w-40 flex-1"
         />
       </div>
 
-      <MyWorkBody
-        loading={loading}
-        offline={offline}
-        errors={fatal ? errors : NO_ERRORS}
-        // "Items may be missing", never "the page is full": a leg hit its
-        // server-side cap, the merged union overshot, or a provider lost part of
-        // its results. True on a page that arrives short, so the copy it drives
-        // may only claim incompleteness.
-        capped={page.truncated}
-        noSources={sources.isSuccess && enabledLegs.length === 0}
-        answered={answeredLegs.map((l) => l.provider)}
-        allSettled={enabledLegs.every(settledNow)}
-        items={items}
-        visible={visible}
-        activeIndex={activeIndex}
-        recents={recents}
-        pendingOpenUrl={pendingOpenUrl}
-        onRetry={refresh}
-        onSelect={setActiveUrl}
-        onOpen={(item, opts) => void openItem(item, opts)}
-      />
+      {category === "todos" ? (
+        <WorkTodosList
+          query={todos}
+          connected={gitlabOn}
+          sourcesPending={hosts.isPending}
+          filter={filter}
+          completing={completeTodo.isPending}
+          completionNotice={
+            completeTodo.isPaused
+              ? "Offline. To-do completion will resume when the connection returns."
+              : null
+          }
+          onComplete={(todo) =>
+            void completeTodo
+              .mutateAsync({ host: todo.host, id: todo.id })
+              .catch(toastError)
+          }
+          onRetry={refresh}
+          onOpen={(todo) => {
+            if (todo.item) void openItem(todo.item);
+            else void openUrl(todo.url);
+          }}
+        />
+      ) : category === "team" && teamLabels.length === 0 ? (
+        <QuietLine>
+          Configure your team labels to find matching merge requests.
+        </QuietLine>
+      ) : (
+        <MyWorkBody
+          loading={loading}
+          offline={offline}
+          errors={fatal ? errors : NO_ERRORS}
+          // "Items may be missing", never "the page is full": a leg hit its
+          // server-side cap, the merged union overshot, or a provider lost part of
+          // its results. True on a page that arrives short, so the copy it drives
+          // may only claim incompleteness.
+          capped={page.truncated}
+          noSources={sources.isSuccess && enabledLegs.length === 0}
+          answered={answeredLegs.map((l) => l.provider)}
+          allSettled={enabledLegs.every(settledNow)}
+          items={items}
+          visible={visible}
+          activeIndex={activeIndex}
+          recents={recents}
+          pendingOpenUrl={pendingOpenUrl}
+          onRetry={refresh}
+          onSelect={setActiveUrl}
+          onOpen={(item, opts) => void openItem(item, opts)}
+        />
+      )}
+      {labelsOpen && (
+        <TeamLabelsDialog
+          labels={teamLabels}
+          onClose={() => setLabelsOpen(false)}
+        />
+      )}
+      {connectItem && (
+        <ConnectWorkRepoDialog
+          item={connectItem}
+          onClose={() => setConnectItem(null)}
+          onConnected={async (repo, stillValid) => {
+            if (!stillValid()) return;
+            const item = connectItem;
+            setConnectItem(null);
+            await openItem(item, { connectedRepo: repo });
+          }}
+        />
+      )}
       {/* Outside every body branch and never unmounted: a live region announces
           CHANGES, so one that appears already carrying its first line is silent.
           Given nothing to say while the error screen owns the message. */}
@@ -1119,9 +1226,8 @@ function MyWorkBody({
     // screen, is where a first run needs the sign-in commands.
     return (
       <QuietLine>
-        No forge accounts connected. Run gh auth login or glab auth login for
-        GitHub or GitLab, or add an Atlassian API token in Settings → Accounts
-        for Bitbucket.
+        Connect GitLab in Settings → Accounts, or run glab auth login, to see
+        your work.
       </QuietLine>
     );
   }
@@ -1140,15 +1246,13 @@ function MyWorkBody({
     // the page must not read as "nothing exists".
     const sole = answered.length === 1 ? answered[0] : null;
     const source = sole ? providerLabel(sole) : "Your forges";
-    const nothing = sole
-      ? `Nothing on ${providerLabel(sole)} involves you right now.`
-      : "Nothing involves you right now.";
+    const nothing = "No open items in this category.";
     return capped ? (
       <QuietLine>
         {`${source} didn't return everything. There may be work this view can't show.`}
       </QuietLine>
     ) : (
-      <QuietLine>{`${nothing} ${scopeSentence(answered)}`}</QuietLine>
+      <QuietLine>{nothing}</QuietLine>
     );
   }
   if (visible.length === 0) {
@@ -1398,8 +1502,10 @@ function MyWorkRow({
   onOpen: OpenItem;
 }) {
   const Icon = item.isPullRequest ? GitPullRequestIcon : CircleDashedIcon;
-  const typeLabel = item.isPullRequest ? "Pull request" : "Issue";
-  const browserLabel = `Opens on ${item.host || providerLabel(item.provider)} — not a local repository`;
+  const typeLabel = item.isPullRequest ? "Merge request" : "Issue";
+  const browserLabel = item.isPullRequest
+    ? "Choose or clone a local repository to open full MR detail"
+    : `Opens on ${item.host || providerLabel(item.provider)} — not a local repository`;
   return (
     <button
       type="button"
@@ -1437,7 +1543,8 @@ function MyWorkRow({
         <Icon className="size-3.5" aria-hidden />
       </span>
       <span className="shrink-0 tabular-nums text-muted-foreground">
-        #{item.number}
+        {item.isPullRequest ? "!" : "#"}
+        {item.number}
       </span>
       <span
         className="min-w-0 flex-1 truncate"
@@ -1470,7 +1577,11 @@ function MyWorkRow({
           title={browserLabel}
           className="flex shrink-0 items-center text-muted-foreground"
         >
-          <ArrowSquareOutIcon className="size-3" aria-hidden />
+          {item.isPullRequest ? (
+            <FolderPlusIcon className="size-3" aria-hidden />
+          ) : (
+            <ArrowSquareOutIcon className="size-3" aria-hidden />
+          )}
         </span>
       )}
       {pending && (

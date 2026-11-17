@@ -30,5 +30,5 @@ onlineManager.subscribe((online) => {
 // sources-probe key is spelled here rather than imported: MY_WORK_SOURCES_KEY
 // lives in git/queries/forge-repos.ts, which would pull the query layer in.
 installAccountChangeReset(queryClient, {
-  invalidateKeys: [["bb-account"], ["my-work-sources"]],
+  invalidateKeys: [["bb-account"], ["my-work-sources"], ["gitlab-work-hosts"]],
 });

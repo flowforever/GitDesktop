@@ -41,9 +41,12 @@ import {
   COMMENT_POST_PENDING_REASON,
   pendingWriteReason,
 } from "@/lib/offline-writes";
+import {
+  useMrScopedDraft,
+  useMrScopedKeyedDraft,
+} from "@/lib/pulls/mr-document-drafts";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
-import { useKeyedEntityState } from "@/lib/use-keyed-entity-state";
 
 export type DiffSections = ReturnType<typeof splitUnifiedDiff>;
 
@@ -359,7 +362,7 @@ export function CommitComments({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // Identity is the same triple the comments are read and written under.
   const commitIdentity = `${repoPath}#${lens}#${sha}`;
-  const draft = useKeyedEntityState(commitIdentity, "");
+  const draft = useMrScopedKeyedDraft(commitIdentity);
   // Neither call site keys this component on the commit, so a different commit
   // must never inherit the previous one's pending delete confirm — a render-time
   // state adjustment, not an effect.
@@ -744,7 +747,9 @@ export function CommitLineComposer({
 }) {
   const createLineComment = useCreateCommitComment(repoPath, lens);
   const mentions = useMentionCandidates({ repoPath, lens, provider });
-  const [body, setBody] = useState("");
+  const [body, setBody] = useMrScopedDraft(
+    `commit-line|${sha}|${path}|${side}|${line}|${fromLine ?? line}`,
+  );
 
   // The multi-line range, normalized: [from, line] with from <= line.
   const rangeFrom = fromLine !== undefined && fromLine < line ? fromLine : line;

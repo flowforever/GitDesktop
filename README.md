@@ -55,10 +55,9 @@ instead, see [Development](#development).
   [Bitbucket Cloud](#bitbucket-cloud), each with PRs/MRs, CI, and project
   settings in the same panels; [issues in-app](#issues-and-to-dos) on GitHub
   and GitLab, or via [Jira](#jira-cloud-issues) on Bitbucket.
-- **[My work](#my-work), one inbox across repos and forges**: your open
-  pull requests, merge requests, review requests, and issues from
-  GitHub, GitLab, and Bitbucket, with Enter opening each right where
-  the work lives.
+- **[My works](#my-works), your GitLab start page**: personal, authored,
+  team-labelled and mentioned merge requests, native Todos and issues across
+  your GitLab instances. Open complete MR details in separate app tabs.
 - **A [GitHub Actions cockpit](#github-actions)**: runs you can filter by
   workflow, event, status, branch, or actor; their jobs and steps; re-run /
   cancel / dispatch (from the run or a right-click on its row); failed-step
@@ -998,30 +997,36 @@ knowing the URL. **Fork** only shows on a repository that isn't already
 yours, so on Bitbucket (where Explore lists just workspaces you belong to)
 it doesn't normally appear. Fully keyboard-navigable.
 
-### My work
+### My works
 
-A cross-repo inbox of the open work that involves you, across all three
-forges. On **GitHub** it collects every pull request and issue you
-authored, were assigned, were mentioned in, or commented on, plus
-anything awaiting your review; **GitLab** adds the merge requests and
-issues from each host you're signed in to, and **Bitbucket** the pull
-requests from your recent repositories. Newest first, so what's waiting
-on you is one screen away instead of one repository at a time. Every row
-carries the mark of the forge it came from, each forge loads on its own,
-and a forge you haven't connected simply doesn't appear. Narrow it with
-the **All / Pull requests / Issues** tabs and a filter box that takes
-arrow keys and Enter, then press Enter on a row: an item from a
-repository you've added to GitDesktop usually opens right in the app, and
-the ↗ marks the rows GitDesktop already knows will open on their host in
-your browser — a row without it can still land there when its checkout
-can't be confirmed as you open it. A pull request usually lands in the
-**worktree** its head branch is checked out in (when GitDesktop can
-resolve that in time), so you arrive in the checkout the work lives in;
-**Shift+Enter** (or *Open in main workspace* on the row's right-click
-menu) takes you to the main workspace instead.
-Read-only, with a **Refresh** in the header, plus *Open on GitHub / GitLab /
-Bitbucket* and *Copy link* alongside. Reach it with `Ctrl`/`⌘`+`Shift`+`M`,
-from the welcome screen, or from the command palette (*My work*).
+GitDesktop opens on **My works**, a GitLab workspace across the instances
+configured in `glab`. Six categories keep different kinds of work separate:
+
+- **My Merge Requests** (default): open MRs assigned to you or listing you as a reviewer.
+- **Authored by Me**: open MRs you created.
+- **Team Merge Requests**: open MRs matching any configured team label across
+  projects you can access. Configure up to six labels from this category.
+- **Mentioned Me**: open MRs with GitLab mention records, excluding MRs assigned
+  to you or listing you as a reviewer. Both pending and completed mention records count.
+- **Todos**: pending GitLab to-dos, with a Done action for each item.
+- **Issues**: open issues you created or are assigned to.
+
+MR rows open complete details in separate, closable application tabs. Opening
+an MR again selects its existing tab. GitDesktop uses a verified local checkout
+or worktree; if none is available, choose a checkout or clone the project first.
+Comments and review drafts remain associated with their MR as you switch tabs.
+The pinned My works tab keeps your place in the list.
+
+Filter loaded items by title, project or number. Arrow keys navigate the MR list,
+and Enter opens the selection. Refresh reloads the selected category. Results
+are bounded; a note appears when items may be missing. Mentioned Me reflects the
+mention history GitLab retains. Team labels persist across restarts; open MR tabs
+last for the current session.
+
+Use **Repositories** for the repository list and the open, clone and create
+commands. Returning from a repository opens My works. GitHub and Bitbucket remain
+available in the repository views. The command palette and `Ctrl`/`⌘`+`Shift`+`M`
+also open My works.
 
 ### GitLab
 

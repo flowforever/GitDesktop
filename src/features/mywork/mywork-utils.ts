@@ -107,6 +107,7 @@ export function filterMyWork(
     return (
       item.title.toLowerCase().includes(q) ||
       item.repoFullName.toLowerCase().includes(q) ||
+      (item.isPullRequest && `!${item.number}`.includes(q)) ||
       `#${item.number}`.includes(q)
     );
   });

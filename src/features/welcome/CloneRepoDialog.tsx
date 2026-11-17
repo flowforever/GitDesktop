@@ -31,12 +31,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { groupByOwnerNamespace } from "@/features/explore/explore-utils";
-import { useOpenRecordedRepo } from "@/features/repository/useOpenRepoByPath";
+import {
+  claimRepoOpen,
+  useOpenRecordedRepo,
+} from "@/features/repository/useOpenRepoByPath";
 import { presentError } from "@/lib/error-summary";
 import { useAppForm } from "@/lib/form";
 import { cloneRepo, forgeClone, validateRepo } from "@/lib/git/api";
 import { useForgeRepos } from "@/lib/git/queries";
-import type { ForgeProvider, ForgeRepo } from "@/lib/git/types";
+import type { ForgeProvider, ForgeRepo, RepoInfo } from "@/lib/git/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { repoStateLabel } from "@/lib/repo-labels";
 import { useSettings } from "@/lib/settings/queries";
@@ -47,6 +50,7 @@ import {
   ARIA_DISABLED_CLASS,
   useDisabledReason,
 } from "@/lib/use-disabled-reason";
+import { useDraftCreateHold } from "@/lib/use-draft-create-hold";
 import { useSeedOnOpen } from "@/lib/use-seed-on-open";
 import { cn } from "@/lib/utils";
 import { nameFromUrl, parentDir } from "./clone-utils";
@@ -71,16 +75,27 @@ const repoOptionId = (fullName: string) =>
 export function CloneRepoDialog({
   open,
   onOpenChange,
+  target,
+  onCloned,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  target?: { provider: ForgeProvider; cloneUrl: string; name: string };
+  onCloned?: (info: RepoInfo, stillValid: () => boolean) => Promise<void>;
 }) {
   const openRecorded = useOpenRecordedRepo();
   const settings = useSettings();
+  const request = useRef(0);
+  useEffect(
+    () => () => {
+      request.current += 1;
+    },
+    [],
+  );
 
   // Tab, selection, and filter are UI state; the URL and local path are form
   // fields so submission and its spinner come from the form.
-  const [tab, setTab] = useState<CloneTab>("github");
+  const [tab, setTab] = useState<CloneTab>(target ? "url" : "github");
   const [selected, setSelected] = useState<ForgeRepo | null>(null);
   const [filter, setFilter] = useState("");
 
@@ -88,15 +103,22 @@ export function CloneRepoDialog({
   // repos load; the URL tab loads nothing.
   const provider: ForgeProvider =
     tab === "gitlab" ? "gitlab" : tab === "bitbucket" ? "bitbucket" : "github";
-  const repos = useForgeRepos(provider, open && tab !== "url");
+  const repos = useForgeRepos(provider, open && tab !== "url" && !target);
 
   const form = useAppForm({
-    defaultValues: DEFAULTS,
+    defaultValues: { ...DEFAULTS, url: target?.cloneUrl ?? "" },
     onSubmit: async ({ value }) => {
       const dest = value.destination.trim();
       const cloneUrl =
-        tab === "url" ? value.url.trim() : (selected?.cloneUrl ?? "");
+        target?.cloneUrl ??
+        (tab === "url" ? value.url.trim() : (selected?.cloneUrl ?? ""));
       if (!cloneUrl || !dest) return;
+      const run = createHold.begin();
+      const ticket = request.current;
+      const claimed = claimRepoOpen();
+      const ownsDialog = () =>
+        ticket === request.current && createHold.holds(run.gen);
+      const stillValid = () => ownsDialog() && claimed();
       try {
         // GitHub + URL clone via plain git (gh's credential helper covers private
         // GitHub repos); GitLab routes through glab so its token authenticates a
@@ -104,8 +126,15 @@ export function CloneRepoDialog({
         // clones over plain git too — a private Bitbucket repo relies on the
         // user's git credential setup (e.g. Git Credential Manager); GitDesktop
         // does not inject the Atlassian API token into git.
-        const clonedPath =
-          tab === "url"
+        const clonedPath = target
+          ? await forgeClone(
+              target.provider,
+              target.cloneUrl,
+              dest,
+              target.name,
+              value.recurseSubmodules,
+            )
+          : tab === "url"
             ? await cloneRepo(
                 cloneUrl,
                 dest,
@@ -120,15 +149,20 @@ export function CloneRepoDialog({
                 value.recurseSubmodules,
               );
         const info = await validateRepo(clonedPath);
+        if (!stillValid()) return;
         // Closes even when a newer navigation superseded the switch: the clone
         // landed either way.
-        await openRecorded(info);
-        onOpenChange(false);
+        if (onCloned) await onCloned(info, stillValid);
+        else await openRecorded(info);
+        if (ownsDialog()) onOpenChange(false);
       } catch (e) {
         toastError(e);
+      } finally {
+        run.end();
       }
     },
   });
+  const createHold = useDraftCreateHold(form);
 
   // Default the destination near the user's other repos.
   const defaultPath = useEffectEvent(() => {
@@ -136,18 +170,23 @@ export function CloneRepoDialog({
     return recent ? parentDir(recent) : "";
   });
   const seedOnOpen = useEffectEvent(() => {
-    setTab("github");
+    request.current += 1;
+    createHold.nextDraft();
+    setTab(target ? "url" : "github");
     setSelected(null);
     setFilter("");
     form.reset(
-      { url: "", destination: defaultPath(), recurseSubmodules: false },
+      {
+        url: target?.cloneUrl ?? "",
+        destination: defaultPath(),
+        recurseSubmodules: false,
+      },
       { keepDefaultValues: true },
     );
   });
   useSeedOnOpen(open, seedOnOpen);
 
   const values = useSelector(form.store, (s) => s.values);
-  const isSubmitting = useSelector(form.store, (s) => s.isSubmitting);
 
   // Group by owner and flatten to rows for the virtualizer, sharing Explore's
   // ordering so the two surfaces list the same repos in the same order. Each group
@@ -218,12 +257,19 @@ export function CloneRepoDialog({
     useDisabledReason({ disabled: !canClone, reason: cloneDisabledReason });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) request.current += 1;
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="sm:max-w-lg">
         <form
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
+            if (createHold.isRunning()) return;
             form.handleSubmit();
           }}
         >
@@ -236,22 +282,24 @@ export function CloneRepoDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs value={tab} onValueChange={(v) => setTab(v as CloneTab)}>
-            <TabsList className="w-full">
-              <TabsTrigger value="github" className="flex-1">
-                GitHub
-              </TabsTrigger>
-              <TabsTrigger value="gitlab" className="flex-1">
-                GitLab
-              </TabsTrigger>
-              <TabsTrigger value="bitbucket" className="flex-1">
-                Bitbucket
-              </TabsTrigger>
-              <TabsTrigger value="url" className="flex-1">
-                URL
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          {!target && (
+            <Tabs value={tab} onValueChange={(v) => setTab(v as CloneTab)}>
+              <TabsList className="w-full">
+                <TabsTrigger value="github" className="flex-1">
+                  GitHub
+                </TabsTrigger>
+                <TabsTrigger value="gitlab" className="flex-1">
+                  GitLab
+                </TabsTrigger>
+                <TabsTrigger value="bitbucket" className="flex-1">
+                  Bitbucket
+                </TabsTrigger>
+                <TabsTrigger value="url" className="flex-1">
+                  URL
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
 
           {tab !== "url" ? (
             <div className="space-y-2">
@@ -359,7 +407,7 @@ export function CloneRepoDialog({
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={isSubmitting}
+              disabled={createHold.running}
             >
               Cancel
             </Button>
@@ -373,7 +421,8 @@ export function CloneRepoDialog({
               >
                 <form.SubmitButton
                   focusableWhenDisabled={!!blockedReason}
-                  disabled={!canClone}
+                  disabled={!canClone || createHold.running}
+                  pending={createHold.running}
                   aria-describedby={describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >

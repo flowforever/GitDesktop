@@ -328,7 +328,7 @@ fn my_work_project_from_web_url(web_url: &str) -> Option<(String, String, String
 /// Narrow one raw scope element to a wire item, or `None` when it can't address
 /// anything — a record without iid, title, or a parseable project URL has no
 /// usable link, so it is skipped rather than sinking the leg.
-fn my_work_item_from_value(raw: &serde_json::Value, is_pull_request: bool) -> Option<MyWorkItem> {
+pub(super) fn my_work_item_from_value(raw: &serde_json::Value, is_pull_request: bool) -> Option<MyWorkItem> {
     let number = raw.get("iid").and_then(serde_json::Value::as_u64)?;
     let title = raw
         .get("title")

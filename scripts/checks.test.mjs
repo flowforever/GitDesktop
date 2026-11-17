@@ -1389,6 +1389,7 @@ test("draft-create-hold sees exactly its real members", () => {
     "src/features/issues/CreateLocalIssueDialog.tsx",
     "src/features/pulls/CreateLocalPrDialog.tsx",
     "src/features/tags/CreateReleaseDialog.tsx",
+    "src/features/welcome/CloneRepoDialog.tsx",
   ];
   const withoutHook = (source) =>
     source.replace(/\buseDraftCreateHold\s*\(/g, "useOtherHook(");

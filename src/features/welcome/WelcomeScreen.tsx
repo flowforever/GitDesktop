@@ -86,7 +86,7 @@ export function WelcomeScreen() {
     // least-frequent (discovery) action, anchors the bottom.
     {
       id: "open-my-work",
-      label: "My work",
+      label: "My works",
       icon: TrayIcon,
       variant: "outline",
       onClick: openMyWork,

@@ -358,7 +358,11 @@ function SidebarRail({
   );
 }
 
-export function RepositoryView() {
+export function RepositoryView({
+  detailOnly = false,
+}: {
+  detailOnly?: boolean;
+}) {
   const repoPath = useUiStore((s) => s.repoPath);
   const closeRepo = useUiStore((s) => s.closeRepo);
   const repoName = useUiStore((s) => s.repoName);
@@ -786,7 +790,8 @@ export function RepositoryView() {
         <aside
           ref={sidebarRef}
           className={cn(
-            "flex shrink-0 flex-col border-r",
+            "shrink-0 flex-col border-r",
+            detailOnly ? "hidden" : "flex",
             sidebarCollapsed ? "w-12" : "w-[clamp(288px,32vw,384px)]",
           )}
         >

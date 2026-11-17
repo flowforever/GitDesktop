@@ -339,6 +339,12 @@ describe("PR split checkout", () => {
     const confirm = within(dialog).getByRole("button", {
       name: "Discard 1 commit and reset",
     });
+    // The modal takes focus asynchronously after the popover closes.
+    await waitFor(() =>
+      expect(dialog).toContainElement(
+        document.activeElement as HTMLElement | null,
+      ),
+    );
     for (let i = 0; i < 4 && document.activeElement !== confirm; i++)
       await user.tab();
     expect(document.activeElement).toBe(confirm);

@@ -174,6 +174,7 @@ export function invalidateRepoAfterWrite(
   queryClient: QueryClient,
   repo: string,
 ): Promise<void> {
+  void queryClient.invalidateQueries({ queryKey: ["gitlab-work"] });
   const queryKey = repoKeys.all(repo);
   const boards = projectItemsRepoKey(repo);
   const straddling = queryClient.getQueryCache().findAll({

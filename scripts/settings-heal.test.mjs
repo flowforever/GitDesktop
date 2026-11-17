@@ -53,6 +53,20 @@ function assertIdempotent(heal, saved) {
 
 const full = healLoadedSettings(undefined);
 
+test("team labels default empty and heal saved label lists without duplicates", () => {
+  assert.deepEqual(healLoadedSettings(undefined).myWorkTeamLabels, []);
+  assert.deepEqual(
+    healLoadedSettings({ myWorkTeamLabels: null }).myWorkTeamLabels,
+    [],
+  );
+  assert.deepEqual(
+    healLoadedSettings({
+      myWorkTeamLabels: [" team a ", "", 42, "team a", null],
+    }).myWorkTeamLabels,
+    ["team a"],
+  );
+});
+
 // Committed objects as the writers build them: a form draft or a `trimmed ||
 // undefined` alias leaves undefined-valued keys that JSON storage drops.
 const UNDEFINED_TOP = {

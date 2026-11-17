@@ -1,6 +1,8 @@
 import { create } from "zustand";
+import { repoOriginPath, validateRepo } from "@/lib/git/api/repo";
 import { normPath } from "@/lib/git/path";
 import type { CommitAuthor, RemoteLens, RepoInfo } from "@/lib/git/types";
+import type { WorkCategory } from "@/lib/git/types/gitlab-work";
 import type { PrSection } from "@/lib/pulls/pr-section";
 import { retargetAmendPin } from "@/lib/stores/draft-pin";
 import {
@@ -16,6 +18,14 @@ import {
   takeLinkHop,
 } from "@/lib/stores/nav-history";
 import { holdNavigation } from "@/lib/stores/navigator-hold";
+import { createOpenClaims } from "@/lib/stores/open-claims";
+import {
+  closeDocument,
+  documentId,
+  type MrDocument,
+  openDocument,
+  type WorkDocuments,
+} from "@/lib/stores/work-documents";
 import { startViewTransition } from "@/lib/view-transition";
 
 export type AppView =
@@ -26,7 +36,7 @@ export type AppView =
   | "explore"
   | "mywork";
 /** The views that can sit UNDER an overlay — where closing one returns to. */
-type NonOverlayView = "welcome" | "repo";
+type NonOverlayView = "welcome" | "repo" | "mywork";
 /** Views that overlay a real screen. Derived from {@link AppView}, and
  *  `OVERLAY_VIEWS` below is exhaustive over it, so a new AppView member stops
  *  compiling until it is classified as one or the other. */
@@ -35,7 +45,6 @@ const OVERLAY_VIEWS: Record<OverlayView, true> = {
   settings: true,
   help: true,
   explore: true,
-  mywork: true,
 };
 /** A type predicate rather than a boolean: the else branch has to narrow to
  *  {@link NonOverlayView} for the `previousView` writes to type-check at all. */
@@ -295,6 +304,23 @@ function isEmptyDraft(d: CommitDraft): boolean {
 
 export interface UiState {
   view: AppView;
+  workDocuments: WorkDocuments;
+  workDocumentConnection: {
+    document: MrDocument;
+    closeDocumentId?: string;
+  } | null;
+  clearWorkDocumentConnection: () => void;
+  workCategory: WorkCategory;
+  setWorkCategory: (category: WorkCategory) => void;
+  openRepositories: () => void;
+  activateWorkDocument: (id: string, closeDocumentId?: string) => Promise<void>;
+  closeWorkDocument: (id: string) => void;
+  updateWorkDocument: (
+    id: string,
+    patch: Partial<
+      Pick<MrDocument, "section" | "selectedPath" | "selectedCommitOid">
+    >,
+  ) => void;
   /** Underlying view to return to when an overlay (settings, help, explore, my
    *  work) closes. */
   previousView: NonOverlayView;
@@ -483,6 +509,8 @@ export interface UiState {
    *  whichever tab the user is on. One atomic update so the landing target
    *  survives openRepo's own reset. */
   openPr: (target: {
+    document?: MrDocument;
+    closeDocumentId?: string;
     kind: "remote" | "local";
     repoPath: string;
     repoName: string;
@@ -864,8 +892,109 @@ export const useUiStore = create<UiState>()((set, get) => {
   };
 
   return {
-    view: "welcome",
-    previousView: "welcome",
+    view: "mywork",
+    previousView: "mywork",
+    workDocuments: { documents: [], activeId: null },
+    workDocumentConnection: null,
+    clearWorkDocumentConnection: () => set({ workDocumentConnection: null }),
+    workCategory: "mine",
+    setWorkCategory: (category) => {
+      bumpEpochNow();
+      set({ workCategory: category });
+    },
+    updateWorkDocument: (id, patch) =>
+      set((s) =>
+        !s.workDocuments.documents.some(
+          (doc) =>
+            documentId(doc) === id &&
+            Object.entries(patch).some(
+              ([key, value]) => doc[key as keyof MrDocument] !== value,
+            ),
+        )
+          ? s
+          : {
+              workDocuments: {
+                ...s.workDocuments,
+                documents: s.workDocuments.documents.map((doc) =>
+                  documentId(doc) === id ? { ...doc, ...patch } : doc,
+                ),
+              },
+            },
+      ),
+    openRepositories: () => {
+      if (interceptSettingsLeave(() => get().openRepositories())) return;
+      bumpEpochNow();
+      startViewTransition(() =>
+        set({ view: "welcome", previousView: "welcome" }),
+      );
+    },
+    activateWorkDocument: async (id, closeDocumentId) => {
+      if (
+        interceptSettingsLeave(() =>
+          get().activateWorkDocument(id, closeDocumentId),
+        )
+      )
+        return;
+      const doc = get().workDocuments.documents.find(
+        (d) => documentId(d) === id,
+      );
+      if (!doc) return;
+      bumpEpochNow();
+      const claimed = claimRepoOpen();
+      try {
+        await validateRepo(doc.repoPath);
+        const origin = await repoOriginPath(doc.repoPath);
+        if (!claimed()) return;
+        if (
+          origin.host.toLowerCase() !== doc.host.toLowerCase() ||
+          origin.path.toLowerCase() !== doc.repoFullName.toLowerCase() ||
+          origin.provider !== "gitlab"
+        )
+          throw new Error("MR checkout origin changed");
+      } catch {
+        if (!claimed()) return;
+        get().openMyWork();
+        set({ workDocumentConnection: { document: doc, closeDocumentId } });
+        return;
+      }
+      get().openPr({
+        kind: "remote",
+        ref: String(doc.number),
+        repoPath: doc.repoPath,
+        repoName: doc.repoName,
+        section: doc.section ?? null,
+        document: doc,
+        closeDocumentId,
+        stillValid: (epoch) =>
+          get().interactionEpoch === epoch &&
+          get().workDocuments.documents.some(
+            (entry) => documentId(entry) === id,
+          ),
+      });
+    },
+    closeWorkDocument: (id) => {
+      if (interceptSettingsLeave(() => get().closeWorkDocument(id))) return;
+      const state = get();
+      const next = closeDocument(state.workDocuments, id);
+      if (state.workDocuments.activeId !== id || state.view !== "repo") {
+        bumpEpochNow();
+        set({ workDocuments: next });
+        return;
+      }
+      const doc = next.documents.find((d) => documentId(d) === next.activeId);
+      if (doc) {
+        void get().activateWorkDocument(documentId(doc), id);
+        return;
+      }
+      bumpEpochNow();
+      startViewTransition(() =>
+        set({
+          view: "mywork",
+          previousView: "mywork",
+          workDocuments: closeDocument(get().workDocuments, id),
+        }),
+      );
+    },
     settingsTarget: null,
     mcpBrowseOpen: false,
     activityOpen: false,
@@ -942,8 +1071,9 @@ export const useUiStore = create<UiState>()((set, get) => {
       bumpEpochNow();
       startViewTransition(() =>
         set({
-          view: "welcome",
-          previousView: "welcome",
+          view: "mywork",
+          previousView: "mywork",
+          workDocuments: { ...get().workDocuments, activeId: null },
           repoPath: null,
           repoName: null,
           repoTab: "changes",
@@ -976,6 +1106,19 @@ export const useUiStore = create<UiState>()((set, get) => {
             repoPath: target.repoPath,
             repoName: target.repoName,
             repoTab: "pulls",
+            workDocuments: target.document
+              ? openDocument(
+                  target.closeDocumentId
+                    ? closeDocument(get().workDocuments, target.closeDocumentId)
+                    : get().workDocuments,
+                  {
+                    ...target.document,
+                    repoPath: target.repoPath,
+                    repoName: target.repoName,
+                    number: Number(target.ref),
+                  },
+                )
+              : { ...get().workDocuments, activeId: null },
             // Switching repos clears the rest the way openRepo does; staying in
             // the same repo keeps your other selections and just retargets the PR.
             // The explicit PR keys come AFTER the spread so it can't null them.
@@ -1344,10 +1487,10 @@ export const useUiStore = create<UiState>()((set, get) => {
       if (interceptSettingsLeave(() => get().openMyWork())) return;
       bumpEpochNow();
       startViewTransition(() => {
-        const { view } = get();
         set({
           view: "mywork",
-          previousView: isOverlayView(view) ? get().previousView : view,
+          previousView: "mywork",
+          workDocuments: { ...get().workDocuments, activeId: null },
         });
       });
     },
@@ -1556,3 +1699,11 @@ useUiStore.subscribe((next, prev) => {
   const navHistory = recordNavigation(next, prev, hop, readNavAnchor);
   if (navHistory !== next.navHistory) useUiStore.setState({ navHistory });
 });
+
+const repositoryOpenClaims = createOpenClaims(
+  () => useUiStore.getState().interactionEpoch,
+);
+export const claimRepoOpen = repositoryOpenClaims.claim;
+export const repoOpenWatermark = repositoryOpenClaims.watermark;
+export const claimRepoOpenOrder = repositoryOpenClaims.claimOrder;
+export const reserveRepoOpen = repositoryOpenClaims.reserve;

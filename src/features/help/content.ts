@@ -67,7 +67,7 @@ A few things worth knowing up front:
 {{/ai}}
 ## Open your first repository
 
-Use the welcome screen's buttons, the repo switcher in the header, or the command
+Use the **Repositories** page's buttons, the repo switcher in the header, or the command
 palette — wherever you are in the app, these actions and their shortcuts are available:
 
 - **Open repository** ({{kbd:add-local-repository}}) — point at a folder that's already
@@ -116,7 +116,7 @@ only when AI features are enabled{{/ai}}.
 
 The repository name in the header is a **switcher** ({{kbd:show-repositories}}). Click it
 to see every repo you've opened, grouped by GitHub owner, with a Recent section and a
-filter box — jump between repos without returning to the welcome screen. Each row shows
+filter box — jump between repos without returning to the **Repositories** page. Each row shows
 its **forge** as a leading logo (GitHub, GitLab, or Bitbucket; a cloud for a remote on an
 unrecognized host, a folder for a local-only repo) and, once resolved, a trailing
 **visibility** icon — a lock (private), buildings (internal), or globe (public) — plus a
@@ -211,7 +211,7 @@ half a screen. See **Settings → About** for the current coordinates.`,
 
 **Explore repositories** is a full-page browser for finding a repo to clone, fork, or
 star — without knowing its URL. Open it from the **Explore repositories** button on the
-welcome screen, or from the command palette (*Explore repositories*).
+**Repositories** page, or from the command palette (*Explore repositories*).
 
 Across the top are **GitHub**, **GitLab**, and **Bitbucket** tabs (each needs its account
 connected — see *Getting started*), a **search box**, and a **sort** control:
@@ -264,99 +264,56 @@ From here:
   },
   {
     id: "my-work",
-    label: "My work",
-    body: `# My work
+    label: "My works",
+    body: `# My works
 
-**My work** is a cross-repo inbox: your open pull requests, merge requests, and
-issues from GitHub, GitLab, and Bitbucket, newest first, without opening a repository
-to go looking. Open it with {{kbd:open-my-work}}, from the **My work** button on the
-welcome screen, or from the command palette (*My work*).
-**Back** in the header, or Esc, closes the inbox and returns you to the screen
-underneath.
+**My works** is the GitLab home page shown at startup and when you return from a
+repository. Open it at any time with {{kbd:open-my-work}} or the command palette.
+Use **Repositories** to open the repository list, clone a project or create a repo.
+**Settings** and **Help** remain available from the home header.
 
-On **GitHub** it gathers anything you **authored**, are **assigned** to, were
-**mentioned** in, or **commented on**, together with anything **awaiting your
-review**, across every repository your account can see, so items from repos you've
-never cloned sit alongside the ones you have. **GitLab** contributes the merge
-requests you authored, are assigned to, or are asked to review, plus the issues
-you authored or are assigned to, from every host you're signed in to, and
-**Bitbucket** the pull requests from the Bitbucket repositories in your recents
-(Bitbucket has no account-wide search, so the inbox asks the checkouts it knows).
+## Six categories
 
-Only a forge you're signed in to is asked, and each one answers on its own: the list
-paints once with everything your forges returned, waiting a moment for a slower one
-rather than reshuffling, and a forge you haven't connected is simply absent. One that
-still lags, or couldn't be reached, gets a muted line under the rows — what's already
-there stays put while it catches up.
+- **My Merge Requests** is the default: open MRs assigned to you or listing you as a reviewer.
+- **Authored by Me** lists open MRs you created.
+- **Team Merge Requests** finds open MRs matching any configured label across all
+  accessible projects. Choose **Configure labels** and enter up to six names, one
+  per line. The labels are shared across your GitLab instances and saved locally.
+- **Mentioned Me** lists open MRs with retained GitLab mention records. It includes
+  completed mention records and excludes MRs currently assigned to you or listing
+  you as a reviewer.
+- **Todos** shows pending GitLab to-dos. **Done** completes that one item; opening
+  its target leaves the to-do pending.
+- **Issues** combines open issues you created and open issues assigned to you.
 
-## Reading the list
+Only the selected category loads. The filter narrows the loaded title, repository
+or number. Use the arrow keys and {{key:Enter}} in the MR filter to open a row.
+Todo rows also support arrow-key navigation. **Refresh** reloads the current
+category. A note appears when a page limit or an unreachable instance may leave
+items missing. Existing rows remain available if a refresh fails.
 
-Each row is a single line: a pull-request or issue glyph, the item's number, its
-title, then the forge's mark beside the repository it lives in, and when it last
-changed. That mark is monochrome, drawn in the same ink as the rest of the row.
-A draft pull or merge request carries a Draft badge after its title. The
-number beside the title in the header is how many items came back, and each tab
-carries its own count.
+## MR detail tabs
 
-Rows are ordered by **most recently updated**, merged across the forges that answered.
-Each forge fetches a single page of results, so a big inbox won't arrive whole. When
-items may be missing (a page filled up, or part of a fetch didn't arrive), a note
-says so at the bottom: *This list may be missing items. Filter to narrow what's
-loaded.* You'll see it under the rows, and under **No items match** as well, since a
-filter that finds nothing is when a missing item matters most.
+MR rows open in separate application tabs above the category bar. Reopening the
+same MR selects its existing tab. Details use the same complete review, editing,
+merge and local Git capabilities as the repository view, with the same permission
+checks and confirmations.
 
-## Narrowing and opening
+GitDesktop verifies the matching local repository and can use a worktree already
+holding the MR branch. When it cannot find a checkout, choose an existing one or
+clone the project to continue. Opening a detail tab does not check out a branch.
 
-Three tabs pick the slice: **All**, **Pull requests**, and **Issues**. The **filter
-box** beside them matches on **title**, **repository**, or **number** (\`#123\`, or
-just the digits) as you type, filtering what's already loaded rather than searching
-again.
+Switch tabs to keep several MRs available. The pinned **My works** tab keeps the
+home filter and scroll position. Detail tabs retain their section and selected
+diff, and unfinished comments remain attached to their own MR. Closing a tab
+with a draft asks for confirmation; drafts remain available during the session.
+Open detail tabs reset on restart.
 
-The keyboard flow lives in that box: **↑ / ↓** move the highlight through the visible
-rows and **Enter** opens the highlighted one, so you can type, arrow, and open without
-leaving it. Clicking a row does the same thing.
-
-Where a row opens depends on whether GitDesktop recognizes its repository as one of
-yours. An item from a repository you've added usually opens **in the app**: GitDesktop
-switches to that repository and lands on the pull request or issue. Everything else
-opens **on its own host in your browser**. The match reads each repo's resolved owner,
-host, and the name its remote spells, so a clone sitting in a folder you renamed still
-counts as yours once GitDesktop has looked at it; one you added moments ago, before any
-of that is resolved, can still go to the browser. The **↗** on a row marks the ones
-GitDesktop already knows open in the browser; a row without it can still land there
-when its checkout can't be confirmed at open time. The inbox itself changes nothing:
-it finds the item and hands you to the place where you can act on it.
-
-A pull request usually lands where its branch already is. When one of the repository's
-worktrees has that pull request's head branch checked out, GitDesktop opens it there
-rather than in the main workspace, so you arrive in the checkout the work lives in.
-Confirming the branch really belongs to that pull request takes a quick background
-check, and whatever it can't confirm opens the main workspace instead: a pull
-request from a fork, a branch that isn't checked out anywhere, a slow network. A row
-shows a small spinner while GitDesktop works out where to open it. Issues skip the
-branch check and open in the main workspace.
-
-{{Secondaryclick}} a row for **Open on GitHub / GitLab / Bitbucket** (whichever host
-the item lives on) and **Copy link**; on a pull request from a repository you've
-added, **Open in main workspace** heads the menu and skips the worktree for that one
-open. The menu opens from the keyboard too, with {{key:shift+f10}} or the Menu key on
-the highlighted row. {{key:shift+enter}} opens the main workspace directly,
-Shift-click from the pointer.
-
-## Keeping it current
-
-**Refresh** in the header re-runs every connected forge and spins while the fetches
-are in flight. It re-checks which forges are connected too, so one you signed in to
-while the inbox was open joins the list on the next refresh.
-
-Each forge rides its own connection: GitHub the GitHub CLI (\`gh\`), GitLab the GitLab
-CLI (\`glab\`), and Bitbucket the Atlassian API token you saved. Set them up in
-**Settings → Accounts**, and see *Getting started* for the sign-in options. With none
-of them connected the screen says so and points you at the sign-in. When every
-connected forge fails with nothing to show, the screen reports it with a
-**Retry**, naming each forge that failed when more than one did, and **Details**
-opens the full error text. If your only connected forge failed for a missing
-CLI or token, the screen points you at that setup instead of the error behind it.`,
+Issue links use the existing issue view when a local repository matches, otherwise
+they open on GitLab. Todo targets that are MRs use MR detail tabs; other target
+kinds can open on GitLab. Connect an account through **Settings → Accounts** or
+with glab auth login. GitHub and Bitbucket continue to work in repository views.
+`,
   },
   {
     id: "repo-settings",
@@ -1310,7 +1267,7 @@ sits in the collapsed "Archived" section, and filter text can hide the rest.
   folder in your file manager, which otherwise breaks the path each worktree records.
 
 A repository you leave from one of its linked worktrees reopens in that worktree:
-pick it from the welcome screen's **Repositories** list, the header's repository
+pick it from the **Repositories** page, the header's repository
 switcher, or *File → Open Recent* on macOS and you land back where you were.
 Leaving from the main workspace is remembered the same way, and GitDesktop keeps
 track across restarts. A row that will reopen a worktree shows that worktree's
@@ -1321,7 +1278,7 @@ heads the menu; {{key:shift+f10}} or the Menu key opens that menu on the
 highlighted row. If the worktree has been removed or can't be opened, the main
 workspace opens. The row of the repository you're already in still opens its
 main workspace, and opening a repository any other way (such as the folder
-picker, dropping a folder on the window, a submodule, cloning, My work, or
+picker, dropping a folder on the window, a submodule, cloning, My works, or
 picking a worktree) goes where you chose.
 
 A branch can only be checked out in one worktree at a time, so the list excludes branches

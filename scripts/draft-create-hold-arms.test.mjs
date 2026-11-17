@@ -329,6 +329,7 @@ const CALLERS = [
   "src/features/issues/CreateLocalIssueDialog.tsx",
   "src/features/pulls/CreateLocalPrDialog.tsx",
   "src/features/tags/CreateReleaseDialog.tsx",
+  "src/features/welcome/CloneRepoDialog.tsx",
 ];
 const PROMISE_MEMBERS = [
   "src/features/projects/BoardAddDialogs.tsx",

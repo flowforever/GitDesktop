@@ -9,6 +9,11 @@ import type {
   ForgeStatus,
 } from "../types";
 import { MY_WORK_PAGES_KEY, MY_WORK_SOURCES_KEY } from "./forge-repos";
+import {
+  GITLAB_WORK_ACCOUNTS_KEY,
+  GITLAB_WORK_HOSTS_KEY,
+  GITLAB_WORK_KEY,
+} from "./gitlab-work";
 
 /** Shared by the hook and imperative reads (the checkout route's cache read and
  *  its prefetch). gh is a local spawn, so the read runs whatever
@@ -133,6 +138,9 @@ export function useInvalidateAfterReconnect() {
     // from the dialog reads as "not connected" until the window lapses. The pages
     // follow: what a leg returns depends on the session that fetched it.
     queryClient.invalidateQueries({ queryKey: MY_WORK_SOURCES_KEY });
+    queryClient.invalidateQueries({ queryKey: GITLAB_WORK_HOSTS_KEY });
+    queryClient.invalidateQueries({ queryKey: GITLAB_WORK_ACCOUNTS_KEY });
+    void queryClient.resetQueries({ queryKey: GITLAB_WORK_KEY });
     queryClient.invalidateQueries({ queryKey: MY_WORK_PAGES_KEY });
   }, [queryClient]);
 }

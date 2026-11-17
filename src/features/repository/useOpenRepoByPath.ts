@@ -37,10 +37,21 @@ import {
 } from "@/lib/settings/queries";
 import { useConfirm } from "@/lib/stores/confirm";
 import { repoNameFromPath } from "@/lib/stores/notifications";
-import { registerRepoShellWarmup, useUiStore } from "@/lib/stores/ui";
+import {
+  claimRepoOpen,
+  registerRepoShellWarmup,
+  useUiStore,
+} from "@/lib/stores/ui";
 import { isAppError } from "@/lib/tauri/invoke";
 import { toastComposedError, toastError } from "@/lib/toast";
-import { createOpenClaims } from "./open-claims";
+
+export {
+  claimRepoOpen,
+  claimRepoOpenOrder,
+  repoOpenWatermark,
+  reserveRepoOpen,
+} from "@/lib/stores/ui";
+
 import { settleWithin } from "./repo-shell-budget";
 import { warmRepoShell } from "./repo-shell-prefetch";
 
@@ -56,25 +67,9 @@ const RECORD_REFRESH_BOUND_MS = 1500;
  *  `openRepo` sites retire pending opens through the epoch bump; both also claim
  *  through `claimWarmRepoShell`, which RepoDialogs' failure reopen honours and a
  *  worktree promote's landing ignores. */
-const openClaims = createOpenClaims(
-  () => useUiStore.getState().interactionEpoch,
-);
-
-/** Claims an open at its REQUEST; the check fails once a newer open or any
- *  navigation arrives. */
-export const claimRepoOpen = openClaims.claim;
-
-/** Notes the latest open without claiming one; the check fails once a newer
- *  open or any navigation arrives. */
-export const repoOpenWatermark = openClaims.watermark;
-
-/** Claims an open at its REQUEST; the check fails only once a newer open is
- *  claimed, whatever navigation happens meanwhile. */
-export const claimRepoOpenOrder = openClaims.claimOrder;
 
 /** Takes an open's place at its REQUEST without claiming it; calling the result
  *  claims that place, or returns null once a newer open or any navigation came. */
-export const reserveRepoOpen = openClaims.reserve;
 
 // The store's cross-repo landings hold on this (src/lib can't import it). Below
 // `openClaims`, which it closes over; the module-level client is the app's.

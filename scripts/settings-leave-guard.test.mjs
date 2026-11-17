@@ -167,7 +167,7 @@ function viewWriterProblems(text) {
   for (const m of members) {
     if (!writers.has(m.key) || Object.hasOwn(EXEMPT, m.key)) continue;
     const value = valueOf(m);
-    const body = /^\s*(?:\([^)]*\)|[\w$]+)\s*=>\s*\{/.exec(value);
+    const body = /^\s*(?:async\s+)?(?:\([^)]*\)|[\w$]+)\s*=>\s*\{/.exec(value);
     if (!body) {
       problems.push(`${m.key} has no block body`);
       continue;
@@ -181,7 +181,7 @@ function viewWriterProblems(text) {
     const condClose = matchBrace(value, condOpen);
     const cond = value.slice(condOpen, condClose + 1);
     const thunk = new RegExp(
-      `interceptSettingsLeave\\(\\(\\) => get\\(\\)\\.${m.key}\\(`,
+      `interceptSettingsLeave\\(\\(\\)\\s*=>\\s*get\\(\\)\\.${m.key}\\(`,
     );
     if (!thunk.test(cond))
       problems.push(`${m.key}'s guard doesn't resume ${m.key} itself`);
@@ -957,6 +957,17 @@ function pin(check, text, ...mutations) {
 
 /** `s` with `from` replaced exactly once (the mutation fails closed if absent). */
 const once = (from, to) => (s) => s.replace(from, () => to);
+
+test("async navigators accept a guarded multiline arrow and still reject missing or redirected guards", () => {
+  const text = source(UI);
+  const anchor = "    openHelp: () => {";
+  const guard = "if (interceptSettingsLeave(() =>\n get().asyncProbe())) return;";
+  const fixture = text.replace(anchor, `    asyncProbe: async () => { ${guard} bumpEpochNow(); get().openMyWork(); },\n${anchor}`);
+  assert.notEqual(fixture, text, "the navigator fixture must be inserted");
+  assert.deepEqual(viewWriterProblems(fixture), []);
+  assert.ok(viewWriterProblems(fixture.replace(guard, "")).some((problem) => problem.includes("asyncProbe")));
+  assert.ok(viewWriterProblems(fixture.replace("get().asyncProbe()", "get().openHelp()")).some((problem) => problem.includes("asyncProbe")));
+});
 
 test("every view writer in the ui store consults the leave guard or is exempt", () => {
   pin(

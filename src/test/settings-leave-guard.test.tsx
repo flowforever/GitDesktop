@@ -126,7 +126,7 @@ describe("Settings leave guard", () => {
     await prompt();
     await user.click(screen.getByRole("button", { name: "Discard and close" }));
 
-    await waitFor(() => expect(view()).toBe("welcome"));
+    await waitFor(() => expect(view()).toBe("mywork"));
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
     expect(leaveGuard()).toBeNull();
     expect(saveSettingsMerged).not.toHaveBeenCalled();
@@ -154,7 +154,7 @@ describe("Settings leave guard", () => {
       stored = structuredClone(written);
       write.resolve(structuredClone(stored));
     });
-    await waitFor(() => expect(view()).toBe("welcome"));
+    await waitFor(() => expect(view()).toBe("mywork"));
   });
 
   // Scan header L6-7 (guard registered only while unsaved or writing);
@@ -168,7 +168,7 @@ describe("Settings leave guard", () => {
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
-    await waitFor(() => expect(view()).toBe("welcome"));
+    await waitFor(() => expect(view()).toBe("mywork"));
   });
 
   it("F4: a clean screen lets another navigator go directly", async () => {

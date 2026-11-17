@@ -9,6 +9,7 @@ import { type AppSettings, DEFAULT_SETTINGS } from "@/lib/settings/api";
 export type SettingsDraft = Omit<
   AppSettings,
   | "recentRepos"
+  | "myWorkTeamLabels"
   | "diffViewMode"
   | "diffHideWhitespace"
   | "changesViewMode"
@@ -27,6 +28,7 @@ export function toDraft(settings: AppSettings): SettingsDraft {
   // prefs are apply-on-change, owned by their own controls.
   const {
     recentRepos,
+    myWorkTeamLabels,
     diffViewMode,
     diffHideWhitespace,
     changesViewMode,

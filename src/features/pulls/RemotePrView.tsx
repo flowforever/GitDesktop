@@ -261,6 +261,7 @@ import {
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
+import { useMrCommentDraft } from "@/lib/pulls/mr-document-drafts";
 import type { PrSection } from "@/lib/pulls/pr-section";
 import { PR_NOUN } from "@/lib/pulls/pr-state";
 import {
@@ -276,10 +277,10 @@ import { useConfirm } from "@/lib/stores/confirm";
 import { useConflictResolve } from "@/lib/stores/conflict-resolve";
 import { refuseIfSwitched } from "@/lib/stores/notifications";
 import { queuedMergeKey, useUiStore } from "@/lib/stores/ui";
+import { documentId } from "@/lib/stores/work-documents";
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { toastError, toastErrorWithNote } from "@/lib/toast";
 import { useEntityHold, useRevealGuard } from "@/lib/use-entity-hold";
-import { useKeyedEntityState } from "@/lib/use-keyed-entity-state";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { useRetained } from "@/lib/use-retained";
 import { useToastClearance } from "@/lib/use-toast-clearance";
@@ -817,7 +818,15 @@ export function RemotePrView({
     canCreateThread,
     canSubmitReview,
   } = usePrCapabilities(forge.data, provider, writeAccess.data);
-  const [section, setSection] = useState<PrSection>("conversation");
+  const savedDocument = () =>
+    useUiStore
+      .getState()
+      .workDocuments.documents.find(
+        (doc) => doc.repoPath === repoPath && doc.number === number,
+      );
+  const [section, setSection] = useState<PrSection>(
+    () => savedDocument()?.section ?? "conversation",
+  );
   // A section pick is a user action whose state lives here, so it claims the
   // epoch first and a pending continuation yields to it. The automatic
   // corrections below (the pending landing, the fallback) set it silently.
@@ -1214,7 +1223,9 @@ export function RemotePrView({
   const rulesConfig = useEffectiveBranchRules(repoPath);
   const rulesSettling = useEffectiveBranchRulesSettling(repoPath);
   const defaultBranch = useDefaultBranch(repoPath);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(
+    () => savedDocument()?.selectedPath ?? null,
+  );
   // A user file pick, noted first so a pending continuation (a markdown
   // `#N` lookup) strands; the automatic selections stay silent.
   const pickPath = (path: string) => {
@@ -1224,8 +1235,21 @@ export function RemotePrView({
   // Commits-tab drill-in: the selected commit's oid, or null for the list. Reset
   // when the PR number changes (below, alongside the file-selection reset).
   const [selectedCommitOid, setSelectedCommitOid] = useState<string | null>(
-    null,
+    () => savedDocument()?.selectedCommitOid ?? null,
   );
+  useEffect(() => {
+    const doc = useUiStore
+      .getState()
+      .workDocuments.documents.find(
+        (entry) => entry.repoPath === repoPath && entry.number === number,
+      );
+    if (doc)
+      useUiStore.getState().updateWorkDocument(documentId(doc), {
+        section,
+        selectedPath,
+        selectedCommitOid,
+      });
+  }, [repoPath, number, section, selectedPath, selectedCommitOid]);
   // The submit-review dialog's open state (the Review control + palette action).
   const [submitOpen, setSubmitOpen] = useState(false);
   // Pending-review drafts (local-only until submitted); shared by the Files-tab
@@ -2066,7 +2090,7 @@ export function RemotePrView({
   );
 
   // Keyed on the PR on screen, so a hold keeps showing the held PR's draft.
-  const compose = useKeyedEntityState(hold.shownKey, "");
+  const compose = useMrCommentDraft(hold.shownKey);
   const attachOwner = useAttachmentOwner("pr-comment", true);
   const attachGate = useAttachmentSupport({
     forge: forge.data,

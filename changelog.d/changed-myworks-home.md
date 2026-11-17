@@ -1,0 +1,1 @@
+- Start on My works with six GitLab categories: assigned and review-requested merge requests, authored merge requests, team-labelled merge requests, mentions, native to-dos and issues. Open complete MR details in separate app tabs, connect or clone missing checkouts, and complete individual to-dos from home.

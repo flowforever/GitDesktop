@@ -30,6 +30,7 @@ import type {
 import { hasChordModifier, SUBMIT_HINT } from "@/lib/hotkeys/binding";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { pendingWriteReason } from "@/lib/offline-writes";
+import { useMrScopedDraft } from "@/lib/pulls/mr-document-drafts";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { synthesizeThreadHunk } from "./suggestion-utils";
@@ -553,7 +554,7 @@ export function ReviewThreadCard({
   mentions?: MentionSource;
 } & ThreadCallbacks) {
   const [replying, setReplying] = useState(false);
-  const [replyBody, setReplyBody] = useState("");
+  const [replyBody, setReplyBody] = useMrScopedDraft(`reply|${thread.id}`);
   const [replyPending, setReplyPending] = useState(false);
   const [resolvePending, setResolvePending] = useState(false);
   // A write this card started OR one still in the cache from an earlier mount.
@@ -609,11 +610,12 @@ export function ReviewThreadCard({
   async function submitReply() {
     if (!onReply || !replyBody.trim() || replyBusy) return;
     setReplyPending(true);
+    const submittedBody = replyBody;
     try {
       await onReply(thread.id, replyBody.trim());
       // Clear only after the reply lands — a failure keeps the draft so the
       // user doesn't lose what they typed.
-      setReplyBody("");
+      setReplyBody((current) => (current === submittedBody ? "" : current));
       setReplying(false);
     } catch (e) {
       toastError(e);

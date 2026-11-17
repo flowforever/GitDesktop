@@ -372,6 +372,8 @@ export interface AppSettings {
   /** Managed MCP servers an agent session can opt into. Empty = MCP stays off. */
   mcpServers: McpServer[];
   recentRepos: RecentRepo[];
+  /** App-wide OR filter for the GitLab Team Merge Requests home category. */
+  myWorkTeamLabels: string[];
   /** Color theme (Settings → Appearance). "system" follows the OS scheme; "slate" is a
    *  softer dark variant that lifts surfaces off pure black to reduce eye strain. Applied
    *  outside the bulk settings form (apply-on-change), like diffViewMode. */

@@ -126,7 +126,7 @@ describe("repo switch and close", () => {
       boardReturn: { anchor: anchor("p"), epoch: st().interactionEpoch },
     });
     st().closeRepo();
-    expect(st().view).toBe("welcome");
+    expect(st().view).toBe("mywork");
     expect(hist().entries).toEqual([]);
     expect(hist().index).toBe(-1);
     expect(st().boardReturn).toBeNull();
@@ -531,7 +531,6 @@ describe("overlays", () => {
     ["Settings", () => st().openSettings(), () => st().closeSettings()],
     ["Help", () => st().openHelp(), () => st().closeHelp()],
     ["Explore", () => st().openExplore(), () => st().closeExplore()],
-    ["My Work", () => st().openMyWork(), () => st().closeMyWork()],
   ] as const)(
     "opening and closing %s leaves the history identical when no provider has a new answer",
     (_n, open, close) => {

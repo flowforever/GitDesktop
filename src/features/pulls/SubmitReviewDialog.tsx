@@ -27,6 +27,7 @@ import {
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
+import { useMrScopedDraft } from "@/lib/pulls/mr-document-drafts";
 import {
   useClearReviewDrafts,
   useReviewDrafts,
@@ -109,7 +110,9 @@ export function SubmitReviewDialog({
   // reported below in words that say the drafts are still safe — not as a bare error.
   const clearDrafts = useClearReviewDrafts(repoPath, lens, { silent: true });
   const [verdict, setVerdict] = useState<ReviewVerdict>("comment");
-  const [summary, setSummary] = useState("");
+  const [summary, setSummary] = useMrScopedDraft(
+    `summary|${repoPath}|${lens}|${number}`,
+  );
   const [error, setError] = useState<string | null>(null);
   // The parent re-keys this dialog on the PR identity, so a switch can unmount it
   // mid-submit — past `handleOpenChange`'s pending guard. That takes away BOTH of

@@ -7,6 +7,7 @@ import { useMentionCandidates } from "@/features/conversations/useMentionCandida
 import { useCreateReviewThread } from "@/lib/git/queries";
 import type { RemoteLens } from "@/lib/git/types";
 import { SUBMIT_HINT } from "@/lib/hotkeys/binding";
+import { useMrScopedKeyedDraft } from "@/lib/pulls/mr-document-drafts";
 import { useAddReviewDraft } from "@/lib/pulls/review-drafts";
 import { toastError } from "@/lib/toast";
 import { buildSuggestionFence, extractNewSideLines } from "./suggestion-utils";
@@ -53,7 +54,10 @@ export function ReviewComposer({
   lens,
   onClose,
 }: ReviewComposerProps) {
-  const [body, setBody] = useState("");
+  const textKey = `${repoPath}#${lens}#${number}|review|${path}|${side}|${line}|${fromLine ?? line}`;
+  const draft = useMrScopedKeyedDraft(textKey);
+  const body = draft.value;
+  const setBody = draft.set;
   const [pending, setPending] = useState(false);
   const createThread = useCreateReviewThread(repoPath, lens);
   const addDraft = useAddReviewDraft(repoPath, lens, number);
@@ -108,6 +112,7 @@ export function ReviewComposer({
   async function addSingleComment() {
     if (!canCreateThread || !body.trim() || pending) return;
     setPending(true);
+    const submittedBody = body;
     // Posting is optimistic (the thread lands in the cache immediately), so close
     // right away — the synthetic thread renders under the line without waiting.
     // The failure rides the promise (detached, so the close still happens on this
@@ -115,6 +120,11 @@ export function ReviewComposer({
     // callbacks once an observer has no listeners.
     void createThread
       .mutateAsync({ number, path, line, side, startLine, body: body.trim() })
+      .then(() =>
+        draft.setFor(textKey, (current) =>
+          current === submittedBody ? "" : current,
+        ),
+      )
       .catch((e) => toastError(e));
     onClose();
   }
@@ -122,6 +132,7 @@ export function ReviewComposer({
   async function addToReview() {
     if (!body.trim() || pending) return;
     setPending(true);
+    const submittedBody = body;
     try {
       await addDraft.mutateAsync({
         id: crypto.randomUUID(),
@@ -132,6 +143,9 @@ export function ReviewComposer({
         body: body.trim(),
         createdAt: new Date().toISOString(),
       });
+      draft.setFor(textKey, (current) =>
+        current === submittedBody ? "" : current,
+      );
       onClose();
     } catch (e) {
       toastError(e);

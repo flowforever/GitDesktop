@@ -60,12 +60,90 @@ export const ACTIONS = [
   },
   {
     id: "open-my-work",
-    label: "My work",
+    label: "My works",
     category: "Application",
     // mod+m would shadow macOS's native minimize (the listener preventDefaults
     // registered chords), so the surface takes the shift layer with its opener
     // siblings.
     defaultBinding: "mod+shift+m",
+  },
+  {
+    id: "work-mine",
+    label: "My Merge Requests",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-authored",
+    label: "Authored by Me",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-team",
+    label: "Team Merge Requests",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-mentioned",
+    label: "Mentioned Me",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-todos",
+    label: "Todos",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-issues",
+    label: "Issues",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "open-repositories",
+    label: "Repositories",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-next-document",
+    label: "Next MR detail tab",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-previous-document",
+    label: "Previous MR detail tab",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-close-document",
+    label: "Close MR detail tab",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-configure-labels",
+    label: "Configure team labels",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-complete-todo",
+    label: "Mark selected to-do complete",
+    category: "Navigation",
+    defaultBinding: null,
+  },
+  {
+    id: "work-open-selected",
+    label: "Open selected work item",
+    category: "Navigation",
+    defaultBinding: null,
   },
   {
     id: "open-mcp-servers-settings",
@@ -211,7 +289,7 @@ export const ACTIONS = [
   },
   {
     id: "back-to-repositories",
-    label: "Back to repositories",
+    label: "Back to My works",
     category: "Navigation",
     defaultBinding: "mod+w",
   },

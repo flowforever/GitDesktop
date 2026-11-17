@@ -125,6 +125,7 @@ export const CHANGES_VIEW_MODES = ["list", "tree"] as const;
 export const EDIT_HISTORY_ORDERS = ["newest-first", "oldest-first"] as const;
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  myWorkTeamLabels: [],
   ai: {
     provider: "anthropic",
     model: "claude-haiku-4-5",
@@ -501,6 +502,16 @@ export function healLoadedSettings(
         }
       : {}),
     notifications: healNotifications(stored?.notifications),
+    myWorkTeamLabels: Array.isArray(stored?.myWorkTeamLabels)
+      ? [
+          ...new Set(
+            stored.myWorkTeamLabels
+              .filter((v): v is string => typeof v === "string")
+              .map((v) => v.trim())
+              .filter(Boolean),
+          ),
+        ]
+      : [],
   });
 }
 

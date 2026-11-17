@@ -13,8 +13,13 @@ import { AutomationResultDialog } from "@/features/automations/AutomationResultD
 import { ExploreScreen } from "@/features/explore/ExploreScreen";
 import { HelpScreen } from "@/features/help/HelpScreen";
 import { MyWorkScreen } from "@/features/mywork/MyWorkScreen";
+import {
+  closeMrDocument,
+  WorkDocumentBar,
+} from "@/features/mywork/WorkDocumentBar";
 import { RepoNotificationsDialogHost } from "@/features/notifications/RepoNotificationsDialog";
 import { RepositoryView } from "@/features/repository/RepositoryView";
+import { TabPanel } from "@/features/repository/TabPanel";
 import { usePickAndOpenRepo } from "@/features/repository/useOpenRepoByPath";
 import { SettingsScreen } from "@/features/settings/SettingsScreen";
 import { CommandPalette } from "@/features/shortcuts/CommandPalette";
@@ -28,16 +33,14 @@ import { useRepoDrop } from "@/features/welcome/useRepoDrop";
 import { WelcomeScreen } from "@/features/welcome/WelcomeScreen";
 import { syncAnalytics, track } from "@/lib/analytics";
 import { useBackgroundPrSync } from "@/lib/automations/useBackgroundPrSync";
-import {
-  refreshRepoOnFocus,
-  useGitInstalled,
-  usePrefetchMyWorkSources,
-} from "@/lib/git/queries";
+import { refreshRepoOnFocus, useGitInstalled } from "@/lib/git/queries";
 import { useHotkeyAction, useHotkeysListener } from "@/lib/hotkeys/hotkeys";
 import { useModalGateOpen } from "@/lib/hotkeys/modal-gate";
 import { useNavHistoryActions } from "@/lib/hotkeys/nav-history-actions";
 import { useSideButtonNavigation } from "@/lib/hotkeys/side-buttons";
 import "@/lib/last-checkout/subscribe";
+import { ConnectWorkRepoDialog } from "@/features/mywork/ConnectWorkRepoDialog";
+import type { WorkCategory } from "@/lib/git/types/gitlab-work";
 import { MCP_WRITABLE_STORES } from "@/lib/mcp-writable-stores";
 import {
   notificationsDraftOutOfSync,
@@ -45,12 +48,14 @@ import {
   useRepoNotificationsDialog,
 } from "@/lib/notifications/matrix";
 import { useQuitGuard } from "@/lib/parked-writes";
+import { MrDocumentDraftScope } from "@/lib/pulls/mr-document-drafts";
 import {
   useApplyTheme,
   useSaveSettings,
   useSettings,
 } from "@/lib/settings/queries";
 import { type RepoTab, useUiStore } from "@/lib/stores/ui";
+import { documentId, workItemFromDocument } from "@/lib/stores/work-documents";
 import { COLD_INSTANCE_ID, COLD_START } from "@/lib/test-mode";
 import { nextTheme, THEME_LABELS } from "@/lib/theme";
 import { toastError } from "@/lib/toast";
@@ -62,6 +67,24 @@ const NOTHING_HIDDEN: readonly RepoTab[] = [];
 
 function App() {
   const view = useUiStore((s) => s.view);
+  const focusedDocument = useUiStore((s) => {
+    if (
+      s.view !== "repo" ||
+      s.repoTab !== "pulls" ||
+      s.selectedPr?.kind !== "remote"
+    )
+      return null;
+    const doc = s.workDocuments.documents.find(
+      (d) => documentId(d) === s.workDocuments.activeId,
+    );
+    return doc &&
+      doc.repoPath === s.repoPath &&
+      String(doc.number) === s.selectedPr.id
+      ? s.workDocuments.activeId
+      : null;
+  });
+  const documentCount = useUiStore((s) => s.workDocuments.documents.length);
+  const documentConnection = useUiStore((s) => s.workDocumentConnection);
   const openSettings = useUiStore((s) => s.openSettings);
   const openMcpBrowse = useUiStore((s) => s.openMcpBrowse);
   const openHelp = useUiStore((s) => s.openHelp);
@@ -187,11 +210,6 @@ function App() {
   // view, welcome included); no-op unless a recent repo carries a pr-sync rule.
   useBackgroundPrSync();
 
-  // Warm the work inbox's sources probe here rather than on its first render:
-  // it reads two CLI configs plus the keyring over IPC, and paying for that at
-  // app open keeps it off the critical path of the welcome → My work jump.
-  usePrefetchMyWorkSources();
-
   // The app-wide hotkey dispatcher plus the always-available actions.
   useHotkeysListener();
   useNavHistoryActions(dialogOpen);
@@ -271,6 +289,58 @@ function App() {
   useHotkeyAction("show-help", openHelp);
   useHotkeyAction("open-explore", openExplore);
   useHotkeyAction("open-my-work", openMyWork);
+  const openWorkCategory = (category: WorkCategory) => {
+    useUiStore.getState().setWorkCategory(category);
+    openMyWork();
+  };
+  useHotkeyAction("work-mine", () => openWorkCategory("mine"), !dialogOpen);
+  useHotkeyAction(
+    "work-authored",
+    () => openWorkCategory("authored"),
+    !dialogOpen,
+  );
+  useHotkeyAction("work-team", () => openWorkCategory("team"), !dialogOpen);
+  useHotkeyAction(
+    "work-mentioned",
+    () => openWorkCategory("mentioned"),
+    !dialogOpen,
+  );
+  useHotkeyAction("work-todos", () => openWorkCategory("todos"), !dialogOpen);
+  useHotkeyAction("work-issues", () => openWorkCategory("issues"), !dialogOpen);
+  useHotkeyAction(
+    "open-repositories",
+    () => useUiStore.getState().openRepositories(),
+    !dialogOpen,
+  );
+  const cycleDocument = (direction: number) => {
+    const s = useUiStore.getState();
+    const ids = [null, ...s.workDocuments.documents.map(documentId)];
+    const index =
+      s.view === "mywork"
+        ? 0
+        : Math.max(0, ids.indexOf(s.workDocuments.activeId));
+    const next = ids[(index + direction + ids.length) % ids.length];
+    if (next === null) s.openMyWork();
+    else s.activateWorkDocument(next);
+  };
+  const workDocumentsVisible = view === "mywork" || focusedDocument !== null;
+  useHotkeyAction(
+    "work-next-document",
+    () => cycleDocument(1),
+    workDocumentsVisible && documentCount > 0 && !dialogOpen,
+  );
+  useHotkeyAction(
+    "work-previous-document",
+    () => cycleDocument(-1),
+    workDocumentsVisible && documentCount > 0 && !dialogOpen,
+  );
+  useHotkeyAction(
+    "work-close-document",
+    () => {
+      if (focusedDocument) void closeMrDocument(focusedDocument);
+    },
+    focusedDocument !== null && !dialogOpen,
+  );
   useHotkeyAction("toggle-notifications", toggleActivity);
   useHotkeyAction("show-shortcuts", () => setShortcutsOpen(true));
   useHotkeyAction("command-palette", () => setPaletteOpen(true));
@@ -291,6 +361,9 @@ function App() {
     const unlisten = getCurrentWindow().onFocusChanged(
       ({ payload: focused }) => {
         if (focused) {
+          void queryClient.invalidateQueries({
+            queryKey: ["gitlab-work-accounts"],
+          });
           refreshRepoOnFocus(queryClient);
           // The MCP server (with --allow-write) can mutate these store files on
           // disk while we're unfocused; reload each from disk BEFORE invalidating
@@ -327,12 +400,40 @@ function App() {
           scrollbar, and the root never becomes a scroll container that a focus
           or scrollIntoView could shift with no scrollbar to undo it. */}
       <div className="flex h-screen flex-col overflow-clip">
+        {workDocumentsVisible && <WorkDocumentBar />}
         {view === "welcome" && <WelcomeScreen />}
-        {view === "repo" && <RepositoryView />}
+        {view === "repo" && (
+          <div
+            id="work-mr-panel"
+            role={focusedDocument ? "tabpanel" : undefined}
+            aria-labelledby={
+              focusedDocument
+                ? `work-tab-${encodeURIComponent(focusedDocument)}`
+                : undefined
+            }
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <MrDocumentDraftScope id={focusedDocument}>
+              <RepositoryView
+                key={focusedDocument ?? "repository"}
+                detailOnly={focusedDocument !== null}
+              />
+            </MrDocumentDraftScope>
+          </div>
+        )}
         {view === "settings" && <SettingsScreen />}
         {view === "help" && <HelpScreen />}
         {view === "explore" && <ExploreScreen />}
-        {view === "mywork" && <MyWorkScreen />}
+        <TabPanel active={view === "mywork"}>
+          <div
+            id="work-home-panel"
+            role="tabpanel"
+            aria-labelledby="work-tab-home"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <MyWorkScreen active={view === "mywork"} />
+          </div>
+        </TabPanel>
         {/* A thin activity strip for the headerless screens (the repo view uses
             its in-header dock instead); only present while a review runs. */}
         <ActivityStrip />
@@ -343,6 +444,30 @@ function App() {
       <CloneRepoDialog open={cloneOpen} onOpenChange={setCloneOpen} />
       <CreateRepoDialog open={createOpen} onOpenChange={setCreateOpen} />
       <ConfirmDialogHost />
+      {documentConnection && (
+        <ConnectWorkRepoDialog
+          item={workItemFromDocument(documentConnection.document)}
+          onClose={() => useUiStore.getState().clearWorkDocumentConnection()}
+          onConnected={async (repo, stillValid) => {
+            if (!stillValid()) return;
+            const doc = {
+              ...documentConnection.document,
+              repoPath: repo.path,
+              repoName: repo.name,
+            };
+            useUiStore.getState().clearWorkDocumentConnection();
+            useUiStore.getState().openPr({
+              kind: "remote",
+              ref: String(doc.number),
+              repoPath: doc.repoPath,
+              repoName: doc.repoName,
+              section: doc.section ?? null,
+              document: doc,
+              closeDocumentId: documentConnection.closeDocumentId,
+            });
+          }}
+        />
+      )}
       <ReconnectDialog />
       <UpdateChecker />
       <WhatsNew />
