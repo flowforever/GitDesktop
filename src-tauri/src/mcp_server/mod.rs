@@ -780,6 +780,15 @@ mod tests {
         Some(std::ffi::OsStr::new(s))
     }
 
+    fn repo_arg_fixture() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dunce::canonicalize(dir.path())
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        (dir, path)
+    }
+
     #[test]
     fn mcp_should_prime_without_a_marker() {
         assert!(mcp_should_prime(None, os("/usr/bin:/bin")));
@@ -830,43 +839,49 @@ mod tests {
 
     #[test]
     fn allow_write_defaults_off() {
-        let args = parse(&["--repo", "/tmp/x"]);
-        assert_eq!(args.repo, "/tmp/x");
+        let (_fixture, repo) = repo_arg_fixture();
+        let args = parse(&["--repo", &repo]);
+        assert_eq!(args.repo, repo);
         assert!(!args.allow_write);
     }
 
     #[test]
     fn allow_write_flag_enables_it() {
-        let args = parse(&["--repo=/tmp/x", "--allow-write"]);
-        assert_eq!(args.repo, "/tmp/x");
+        let (_fixture, repo) = repo_arg_fixture();
+        let args = parse(&[&format!("--repo={repo}"), "--allow-write"]);
+        assert_eq!(args.repo, repo);
         assert!(args.allow_write);
     }
 
     #[test]
     fn allow_write_order_independent() {
-        let args = parse(&["--allow-write", "--repo", "/tmp/y"]);
-        assert_eq!(args.repo, "/tmp/y");
+        let (_fixture, repo) = repo_arg_fixture();
+        let args = parse(&["--allow-write", "--repo", &repo]);
+        assert_eq!(args.repo, repo);
         assert!(args.allow_write);
     }
 
     #[test]
     fn allow_remote_write_defaults_off() {
-        let args = parse(&["--repo", "/tmp/x"]);
-        assert_eq!(args.repo, "/tmp/x");
+        let (_fixture, repo) = repo_arg_fixture();
+        let args = parse(&["--repo", &repo]);
+        assert_eq!(args.repo, repo);
         assert!(!args.allow_remote_write);
     }
 
     #[test]
     fn allow_remote_write_flag_enables_it() {
-        let args = parse(&["--repo=/tmp/x", "--allow-remote-write"]);
-        assert_eq!(args.repo, "/tmp/x");
+        let (_fixture, repo) = repo_arg_fixture();
+        let args = parse(&[&format!("--repo={repo}"), "--allow-remote-write"]);
+        assert_eq!(args.repo, repo);
         assert!(args.allow_remote_write);
     }
 
     #[test]
     fn allow_remote_write_order_independent() {
-        let args = parse(&["--allow-remote-write", "--repo", "/tmp/y"]);
-        assert_eq!(args.repo, "/tmp/y");
+        let (_fixture, repo) = repo_arg_fixture();
+        let args = parse(&["--allow-remote-write", "--repo", &repo]);
+        assert_eq!(args.repo, repo);
         assert!(args.allow_remote_write);
     }
 
@@ -884,8 +899,9 @@ mod tests {
 
     #[test]
     fn allow_git_write_order_independent() {
-        let args = parse(&["--allow-git-write", "--repo", "/tmp/y"]);
-        assert_eq!(args.repo, "/tmp/y");
+        let (_fixture, repo) = repo_arg_fixture();
+        let args = parse(&["--allow-git-write", "--repo", &repo]);
+        assert_eq!(args.repo, repo);
         assert!(args.allow_git_write);
     }
 
@@ -903,8 +919,9 @@ mod tests {
 
     #[test]
     fn allow_destructive_order_independent() {
-        let args = parse(&["--allow-destructive", "--repo", "/tmp/y"]);
-        assert_eq!(args.repo, "/tmp/y");
+        let (_fixture, repo) = repo_arg_fixture();
+        let args = parse(&["--allow-destructive", "--repo", &repo]);
+        assert_eq!(args.repo, repo);
         assert!(args.allow_destructive);
     }
 
