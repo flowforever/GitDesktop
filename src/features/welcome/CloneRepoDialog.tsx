@@ -32,12 +32,17 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { groupByOwnerNamespace } from "@/features/explore/explore-utils";
 import {
+  proveWorkRepoCheckout,
+  type WorkRepoIdentity,
+  workRepoClonePath,
+} from "@/features/mywork/work-repo-checkout";
+import {
   claimRepoOpen,
   useOpenRecordedRepo,
 } from "@/features/repository/useOpenRepoByPath";
 import { presentError } from "@/lib/error-summary";
 import { useAppForm } from "@/lib/form";
-import { cloneRepo, forgeClone, validateRepo } from "@/lib/git/api";
+import { cloneRepo, forgeClone, pathIsDir, validateRepo } from "@/lib/git/api";
 import { useForgeRepos } from "@/lib/git/queries";
 import type { ForgeProvider, ForgeRepo, RepoInfo } from "@/lib/git/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
@@ -76,11 +81,14 @@ export function CloneRepoDialog({
   open,
   onOpenChange,
   target,
+  reuseFor,
   onCloned,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   target?: { provider: ForgeProvider; cloneUrl: string; name: string };
+  /** Only an explicit work-item identity permits reusing an occupied clone target. */
+  reuseFor?: WorkRepoIdentity;
   onCloned?: (info: RepoInfo, stillValid: () => boolean) => Promise<void>;
 }) {
   const openRecorded = useOpenRecordedRepo();
@@ -120,6 +128,31 @@ export function CloneRepoDialog({
         ticket === request.current && createHold.holds(run.gen);
       const stillValid = () => ownsDialog() && claimed();
       try {
+        if (target && reuseFor) {
+          const existingPath = workRepoClonePath(dest, target.name);
+          if (!existingPath)
+            throw new Error(
+              "Choose a local path and a valid repository folder name.",
+            );
+          const occupied = await pathIsDir(existingPath);
+          if (!stillValid()) return;
+          if (occupied) {
+            const info = await proveWorkRepoCheckout(
+              reuseFor,
+              existingPath,
+              stillValid,
+            );
+            if (!stillValid()) return;
+            if (!info)
+              throw new Error(
+                `${existingPath} already exists, but couldn't be verified as ${reuseFor.host}/${reuseFor.repoFullName}. Choose another local path or choose an existing matching repository.`,
+              );
+            if (onCloned) await onCloned(info, stillValid);
+            else await openRecorded(info);
+            if (ownsDialog()) onOpenChange(false);
+            return;
+          }
+        }
         // GitHub + URL clone via plain git (gh's credential helper covers private
         // GitHub repos); GitLab routes through glab so its token authenticates a
         // private repo that git's credential store doesn't know about. Bitbucket

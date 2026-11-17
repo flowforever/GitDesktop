@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { lineComposerOpen } from "@/features/diff/whitespace-mode";
 import { FULL_OID_RE } from "@/lib/git/oid";
@@ -11,9 +11,9 @@ import {
 import type { RemoteLens } from "@/lib/git/types";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastErrorWithNote } from "@/lib/toast";
+import { resolveCodeImportCandidates } from "./code-import-resolution";
 import { PR_CODE_IMPORT_MAX_CHARS } from "./pr-code-imports";
 import { decodePrFullFile } from "./pr-full-context";
-import { resolvePrImport } from "./pr-import-resolution";
 
 type Navigation = {
   repoPath: string;
@@ -24,6 +24,14 @@ type Navigation = {
   enabled: boolean;
   comparisonSupported: boolean;
   onNavigate: (path: string) => void;
+};
+type ImportChoices = {
+  specifier: string;
+  paths: string[];
+  identity: string;
+  epoch: number;
+  generation: number;
+  request: number;
 };
 
 function identity(value: Navigation) {
@@ -51,6 +59,10 @@ export function usePrImportNavigation(value: Navigation) {
   const live = useRef<Navigation | null>(null);
   const generation = useRef(0);
   const activation = useRef(0);
+  const epochNow = useUiStore((state) => state.interactionEpoch);
+  const [pendingChoices, setPendingChoices] = useState<ImportChoices | null>(
+    null,
+  );
   useLayoutEffect(() => {
     if (
       live.current === null ||
@@ -59,6 +71,13 @@ export function usePrImportNavigation(value: Navigation) {
     )
       generation.current++;
     live.current = value;
+    if (
+      pendingChoices &&
+      (!value.enabled ||
+        pendingChoices.identity !== identity(value) ||
+        pendingChoices.epoch !== epochNow)
+    )
+      setPendingChoices(null);
   });
   useLayoutEffect(
     () => () => {
@@ -69,12 +88,13 @@ export function usePrImportNavigation(value: Navigation) {
   );
 
   const onOpen = useCallback(
-    async (specifier: string, sourcePath: string) => {
+    async (specifier: string, sourcePath: string, kind?: string) => {
       const start = live.current;
       if (!start?.enabled || lineComposerOpen()) return;
       useUiStore.getState().noteUserInteraction();
       const epoch = useUiStore.getState().interactionEpoch;
       const request = ++activation.current;
+      setPendingChoices(null);
       const version = generation.current;
       const current = () =>
         live.current !== null &&
@@ -96,9 +116,10 @@ export function usePrImportNavigation(value: Navigation) {
         const paths = new Set(
           files.filter((file) => !file.undecodable).map((file) => file.path),
         );
-        const target = await resolvePrImport({
+        const candidates = await resolveCodeImportCandidates({
           sourcePath,
           specifier,
+          kind,
           paths,
           readText: async (path) => {
             if (!current() || !paths.has(path)) return null;
@@ -114,11 +135,23 @@ export function usePrImportNavigation(value: Navigation) {
           },
         });
         if (!current()) return;
-        if (target === null) {
+        const targets = [...new Set(candidates)]
+          .filter((path) => paths.has(path))
+          .slice(0, 64);
+        if (targets.length === 0) {
           toast.info(`Could not find ${specifier} in this request's files.`);
           return;
         }
-        live.current?.onNavigate(target);
+        if (targets.length === 1) live.current?.onNavigate(targets[0]);
+        else
+          setPendingChoices({
+            specifier,
+            paths: targets,
+            identity: identity(start),
+            epoch,
+            generation: version,
+            request,
+          });
       } catch (error) {
         if (current())
           toastErrorWithNote(error, "The current file is still open.");
@@ -187,5 +220,30 @@ export function usePrImportNavigation(value: Navigation) {
     [queryClient],
   );
 
-  return { onOpen, getSource };
+  const choices =
+    pendingChoices &&
+    value.enabled &&
+    pendingChoices.identity === identity(value) &&
+    pendingChoices.epoch === epochNow
+      ? pendingChoices
+      : null;
+  const chooseTarget = (path: string) => {
+    if (
+      !choices ||
+      !live.current?.enabled ||
+      choices.generation !== generation.current ||
+      choices.request !== activation.current ||
+      choices.epoch !== useUiStore.getState().interactionEpoch ||
+      lineComposerOpen() ||
+      !choices.paths.includes(path)
+    )
+      return;
+    setPendingChoices(null);
+    live.current.onNavigate(path);
+  };
+  const dismissChoices = () => {
+    activation.current++;
+    setPendingChoices(null);
+  };
+  return { onOpen, getSource, choices, chooseTarget, dismissChoices };
 }

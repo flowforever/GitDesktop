@@ -1,10 +1,9 @@
 import { type ReactNode, useEffect, useEffectEvent, useRef } from "react";
 import { useDiffPaneHold } from "@/features/diff/diff-pane-hold";
-import {
-  PR_CODE_IMPORT_MAX_CHARS,
-  type PrCodeImport,
-  scanPrCodeImports,
-} from "./pr-code-imports";
+import { scanCodeImports, supportsCodeImports } from "./code-import-languages";
+import { PR_CODE_IMPORT_MAX_CHARS } from "./pr-code-imports";
+
+type CodeImport = ReturnType<typeof scanCodeImports>[number];
 
 type Side = "old" | "new";
 type Source = { path: string; text: string };
@@ -113,7 +112,7 @@ function position(root: HTMLElement, offset: number, end: boolean) {
 function markImport(
   host: HTMLElement,
   island: Island,
-  item: PrCodeImport,
+  item: CodeImport,
   sourcePath: string,
 ) {
   const element = island.element;
@@ -143,6 +142,7 @@ function markImport(
   anchor.draggable = false;
   anchor.dataset.prCodeImport = item.specifier;
   anchor.dataset.prCodeSource = sourcePath;
+  if (item.kind) anchor.dataset.prCodeKind = item.kind;
   anchor.dataset.prCodeImportOwned = "";
   anchor.setAttribute("aria-label", item.specifier);
   anchor.title = "Open import at MR head";
@@ -155,10 +155,7 @@ function markImport(
 function markGroup(host: HTMLElement, group: Group) {
   if (group.path === undefined) return;
   const text = group.islands.map((island) => island.text).join("\n");
-  for (const item of scanPrCodeImports(
-    text,
-    /\.[jt]sx$/i.test(group.path),
-  ).reverse()) {
+  for (const item of scanCodeImports(text, group.path).reverse()) {
     let at = 0;
     for (const island of group.islands) {
       if (item.from >= at && item.to <= at + island.text.length) {
@@ -175,7 +172,7 @@ function markGroup(host: HTMLElement, group: Group) {
   }
 }
 
-type Proof = Source & { imports: PrCodeImport[]; starts: number[] };
+type Proof = Source & { imports: CodeImport[]; starts: number[] };
 function sourceProof(source: Source | null): Proof | null {
   if (!source || !source.path || source.text.length > PR_CODE_IMPORT_MAX_CHARS)
     return null;
@@ -185,7 +182,7 @@ function sourceProof(source: Source | null): Proof | null {
   return {
     ...source,
     starts,
-    imports: scanPrCodeImports(source.text, /\.[jt]sx$/i.test(source.path)),
+    imports: scanCodeImports(source.text, source.path),
   };
 }
 
@@ -227,7 +224,7 @@ export function PrCodeImportLinks({
   children: ReactNode;
   path: string;
   oldPath?: string;
-  onOpen: (specifier: string, sourcePath: string) => void;
+  onOpen: (specifier: string, sourcePath: string, kind?: string) => void;
   getSource?: (side: Side) => Promise<Source | null>;
   disabled?: boolean;
 }) {
@@ -240,7 +237,11 @@ export function PrCodeImportLinks({
       if (pointer && window.getSelection()?.isCollapsed === false) return;
       const specifier = anchor.dataset.prCodeImport;
       const sourcePath = anchor.dataset.prCodeSource;
-      if (specifier && sourcePath) onOpen(specifier, sourcePath);
+      if (specifier && sourcePath) {
+        const kind = anchor.dataset.prCodeKind;
+        if (kind) onOpen(specifier, sourcePath, kind);
+        else onOpen(specifier, sourcePath);
+      }
     },
   );
   useEffect(() => {
@@ -334,8 +335,11 @@ export function PrCodeImportLinks({
           mutate(() => markGroup(host, group));
         else if (
           getSource &&
+          supportsCodeImports(group.path ?? path) &&
           group.islands.some((island) =>
-            /\b(import|export|require|from)\b/.test(island.text),
+            /\b(import|export|require|require_relative|require_once|from|use|using|mod|include|include_once|part)\b|::|^\s*(?:\w+\s+)?["'`]/.test(
+              island.text,
+            ),
           )
         ) {
           let proof = proofs.get(group.side);

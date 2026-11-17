@@ -43,7 +43,7 @@ import { copyText } from "@/lib/clipboard";
 import { suppressContextMenu } from "@/lib/context-menu";
 import { composedErrorPresentation, presentError } from "@/lib/error-summary";
 import { rateLimitSummary } from "@/lib/forge-backoff";
-import { forgePrHeadRef, repoOriginPath, validateRepo } from "@/lib/git/api";
+import { forgePrHeadRef, validateRepo } from "@/lib/git/api";
 import { normPath } from "@/lib/git/path";
 import {
   useCompleteWorkTodo,
@@ -58,7 +58,6 @@ import {
   type PrHeadRef,
   providerLabel,
   type RepoInfo,
-  type RepoOrigin,
 } from "@/lib/git/types";
 import type { WorkCategory } from "@/lib/git/types/gitlab-work";
 import { listUserWorktrees, type UserWorktree } from "@/lib/git/worktree";
@@ -66,7 +65,7 @@ import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { applyRepoLens } from "@/lib/repo-lens/queries";
 import type { RecentRepo } from "@/lib/settings/api";
-import { useSettings } from "@/lib/settings/queries";
+import { useAddRecentRepo, useSettings } from "@/lib/settings/queries";
 import { useErrorDialog } from "@/lib/stores/error-dialog";
 import { useUiStore } from "@/lib/stores/ui";
 import { documentId } from "@/lib/stores/work-documents";
@@ -85,6 +84,11 @@ import {
 import { TeamLabelsDialog } from "./TeamLabelsDialog";
 import { WorkTodosList } from "./WorkTodosList";
 import { WORK_CATEGORIES } from "./work-categories";
+import {
+  proveWorkRepoCheckout,
+  workRepoCandidates,
+  workRepoRecent,
+} from "./work-repo-checkout";
 
 /** Stable empty default, so a settings read that hasn't landed doesn't hand a
  *  fresh array to every render. */
@@ -292,7 +296,7 @@ async function resolveTarget(
  * This is the cheap half of a two-stage gate, and it only drops KNOWN
  * disagreement: it runs at render time with no IPC, so an unclassified checkout
  * (the same token-only host, which the backfill can never tag) has to pass here.
- * `originMatches` settles those against the backend's own live verdict.
+ * `proveWorkRepoCheckout` settles those against the backend's live verdict.
  */
 function providerAgrees(recent: RecentRepo, item: MyWorkItem): boolean {
   const stored = asForgeProvider(recent.provider);
@@ -300,95 +304,32 @@ function providerAgrees(recent: RecentRepo, item: MyWorkItem): boolean {
 }
 
 /**
- * The checkouts an open may land on: key-matched AND classified compatibly.
- * `openItem` resolves from this list and the row affordances read it, so a row
- * can never advertise a local action the open refuses over a provider — that
- * disagreement is knowable at render time, from fields already in memory.
- * The ORIGIN proof is deliberately not part of it: it costs a git read per
- * candidate, so it stays an open-time check whose browser fallback remains the
- * recorded optimistic-display trade.
+ * Stored matches are preferred. MR opens also probe a finite set of known paths
+ * and sibling clone destinations: missing or stale metadata must not hide a
+ * checkout that can prove its live origin. Every candidate is still proven at
+ * open time before anything navigates.
  */
 function openableMatches(
   item: MyWorkItem,
   recents: readonly RecentRepo[],
 ): RecentRepo[] {
-  return matchLocalRepos(item, recents).filter((r) => providerAgrees(r, item));
+  const matched = matchLocalRepos(item, recents).filter((r) =>
+    providerAgrees(r, item),
+  );
+  return item.isPullRequest
+    ? workRepoCandidates(item, recents, matched)
+    : matched;
 }
 
 /**
- * `openableMatches` reduced to its yes/no, for the display sites — which ask
- * once per row per render and only ever read the answer, so this stops at the
- * first hit rather than materializing the filtered list. It reads the same
- * `matchLocalRepos` + `providerAgrees` pair, with no second copy of either rule,
- * so a row's affordance can't come to disagree with the open's candidate set.
+ * Optimistic row copy uses only cheap, stored matches. An MR open can discover
+ * another checkout after live proof without starting git reads during rendering.
  */
 function hasOpenableMatch(
   item: MyWorkItem,
   recents: readonly RecentRepo[],
 ): boolean {
   return matchLocalRepos(item, recents).some((r) => providerAgrees(r, item));
-}
-
-/** The item's own authority: `URL.host` is the hostname plus any port the scheme
- *  doesn't default (`:443` drops on https, `:8443` stays), lowercased as it
- *  parses — the spelling the origin side answers with. Null when it won't parse. */
-function itemAuthority(item: MyWorkItem): string | null {
-  try {
-    return new URL(item.url).host.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Whether `repoPath`'s origin really is this item's repository AND would resolve
- * this item's integration, read inside the caller's deadline.
- *
- * EVERY axis must match. Equal namespaces on two hosts are different projects;
- * equal hostnames on two ports are different instances; and the match key's host
- * is a stored value that goes stale the moment a remote is re-pointed — only the
- * origin's own answer settles any of it. Host and authority are deliberately
- * BOTH compared even though authority subsumes host in practice: should the two
- * derivations ever drift apart, requiring both turns that drift into a browser
- * open rather than a wrong one.
- *
- * `provider` is the axis identity alone cannot supply: a checkout on a host only
- * a glab TOKEN knows is the right repository, yet detection can't recognise it
- * and its landing would resolve GitHub's resilient default. Every row reaches
- * here, so this reads "the checkout must route to the forge this row came from"
- * — the live verdict `providerAgrees` can't see.
- *
- * Every unknown — a slow or failed read, a checkout with no origin, an
- * unparseable row URL, any field empty — answers false: an identity that can't
- * be proven must not become a navigation into somebody else's project.
- */
-async function originMatches(
-  item: MyWorkItem,
-  repoPath: string,
-  deadline: number,
-): Promise<boolean> {
-  const origin = await withDeadline<RepoOrigin | null>(
-    repoOriginPath(repoPath),
-    deadline,
-    null,
-  );
-  const authority = itemAuthority(item);
-  if (
-    origin === null ||
-    authority === null ||
-    origin.host === "" ||
-    origin.authority === "" ||
-    origin.path === "" ||
-    origin.provider === ""
-  ) {
-    return false;
-  }
-  return (
-    origin.path.toLowerCase() === item.repoFullName.toLowerCase() &&
-    origin.host.toLowerCase() === item.host.toLowerCase() &&
-    origin.authority.toLowerCase() === authority &&
-    origin.provider === item.provider
-  );
 }
 
 /**
@@ -402,12 +343,22 @@ async function provenCandidate(
   item: MyWorkItem,
   candidates: readonly RecentRepo[],
   deadline: number,
+  stillValid: () => boolean,
 ): Promise<RecentRepo | null> {
   for (const candidate of candidates) {
     // A spent budget would race git against a zero-length timeout and discard
     // the result — stop rather than spawn one per remaining candidate.
-    if (Date.now() >= deadline) return null;
-    if (await originMatches(item, candidate.path, deadline)) return candidate;
+    if (Date.now() >= deadline || !stillValid()) return null;
+    const info = await withDeadline(
+      proveWorkRepoCheckout(
+        item,
+        candidate.path,
+        () => Date.now() < deadline && stillValid(),
+      ),
+      deadline,
+      null,
+    );
+    if (info) return { ...candidate, ...workRepoRecent(item, info) };
   }
   return null;
 }
@@ -534,6 +485,7 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
   const [firstPaint, setFirstPaint] = useState(false);
 
   const settings = useSettings();
+  const addRecent = useAddRecentRepo();
   const recents = settings.data?.recentRepos ?? NO_RECENTS;
   // One leg per forge, each gated on the sources probe: a provider with no
   // sign-in behind it is never asked, so it can neither fail nor delay the rows
@@ -735,9 +687,8 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
         return;
       }
     }
-    // The same set the row's affordances render from, so a local-looking row is
-    // never one this refuses over a provider. Both open arms below start here,
-    // so PRs and issues are gated alike.
+    // Issues retain their stored-match/browser route. MR opens may discover a
+    // checkout under a known parent, but only live origin proof permits a landing.
     const candidates = openableMatches(
       item,
       opts?.connectedRepo ? [opts.connectedRepo, ...recents] : recents,
@@ -816,7 +767,12 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
         // ahead of the optional worktree legs, which may spend the rest of it.
         // None proven opens the browser: the row stays a working link, and no
         // open lands in a checkout that isn't this project's.
-        const proven = await provenCandidate(item, candidates, deadline);
+        const proven = await provenCandidate(
+          item,
+          candidates,
+          deadline,
+          () => !superseded(),
+        );
         if (superseded()) return;
         if (!proven) {
           if (item.isPullRequest) setConnectItem(item);
@@ -828,6 +784,20 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
         match = proven;
         targetPath = proven.path;
         targetName = proven.name;
+        if (
+          item.isPullRequest &&
+          !recents.some(
+            (recent) =>
+              recent.path === proven.path &&
+              recent.host?.toLowerCase() === item.host.toLowerCase() &&
+              recent.provider === item.provider &&
+              recent.owner === item.repoOwner &&
+              recent.repoName === item.repoName,
+          )
+        ) {
+          await addRecent.mutateAsync(proven);
+          if (superseded()) return;
+        }
         // Listed once and shared: both preferences read the same snapshot, and
         // this is the leg that can block.
         const worktrees = await withDeadline(

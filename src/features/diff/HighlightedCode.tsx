@@ -14,10 +14,13 @@ export function HighlightedCode({
   path,
   content,
   className,
+  htmlFallback = false,
 }: {
   path: string;
   content: string;
   className?: string;
+  /** Keep escaped plain text in an HTML island for read-only link decoration. */
+  htmlFallback?: boolean;
 }) {
   const lang = diffLang(path);
   // Memoized so re-renders don't re-run hljs.highlight over the whole file;
@@ -25,13 +28,22 @@ export function HighlightedCode({
   // react-doms re-apply dangerouslySetInnerHTML on wrapper identity; 19.3+
   // compares the __html string first).
   const markup = useMemo(() => {
-    if (!lang || !hljs.getLanguage(lang)) return null;
+    if (!lang || !hljs.getLanguage(lang))
+      return htmlFallback
+        ? {
+            __html: (content || " ")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;"),
+          }
+        : null;
     const html = hljs.highlight(content, {
       language: lang,
       ignoreIllegals: true,
     }).value;
     return { __html: html };
-  }, [lang, content]);
+  }, [lang, content, htmlFallback]);
   const base =
     "p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-break-word";
   if (markup === null) {

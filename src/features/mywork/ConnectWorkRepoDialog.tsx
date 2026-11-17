@@ -1,5 +1,5 @@
 import { open as openDirectory } from "@tauri-apps/plugin-dialog";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -8,12 +8,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { claimRepoOpen } from "@/features/repository/useOpenRepoByPath";
 import { CloneRepoDialog } from "@/features/welcome/CloneRepoDialog";
 import { repoOriginPath, validateRepo } from "@/lib/git/api";
 import type { MyWorkItem, RepoInfo } from "@/lib/git/types";
 import type { RecentRepo } from "@/lib/settings/api";
 import { useAddRecentRepo } from "@/lib/settings/queries";
 import { toastError } from "@/lib/toast";
+import { workRepoOriginMatches, workRepoRecent } from "./work-repo-checkout";
 
 export function ConnectWorkRepoDialog({
   item,
@@ -26,49 +28,50 @@ export function ConnectWorkRepoDialog({
 }) {
   const [cloning, setCloning] = useState(false);
   const [picking, setPicking] = useState(false);
+  const connectionOwner = useRef<object | null>(null);
   const addRecent = useAddRecentRepo();
-  async function connect(
-    info: RepoInfo,
-    stillValid: () => boolean = () => true,
-  ) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new MR identity retires the previous dialog's proof.
+  useLayoutEffect(() => {
+    const owner = {};
+    connectionOwner.current = owner;
+    setPicking(false);
+    setCloning(false);
+    return () => {
+      connectionOwner.current = null;
+    };
+  }, [item.provider, item.host, item.repoFullName, item.number, item.url]);
+
+  async function connect(info: RepoInfo, stillValid: () => boolean) {
+    const owner = connectionOwner.current;
+    const valid = () =>
+      owner !== null && owner === connectionOwner.current && stillValid();
+    if (!valid()) return;
     const origin = await repoOriginPath(info.root);
-    if (!stillValid()) return;
-    if (
-      origin.host?.toLowerCase() !== item.host.toLowerCase() ||
-      origin.path?.toLowerCase() !== item.repoFullName.toLowerCase() ||
-      origin.provider !== "gitlab"
-    ) {
+    if (!valid()) return;
+    if (!workRepoOriginMatches(item, origin)) {
       throw new Error(
         `Choose a checkout of ${item.host}/${item.repoFullName}.`,
       );
     }
-    await addRecent.mutateAsync({ path: info.root, name: info.name });
-    if (!stillValid()) return;
-    await onConnected(
-      {
-        path: info.root,
-        name: info.name,
-        host: item.host,
-        owner: item.repoOwner,
-        repoName: item.repoName,
-        provider: item.provider,
-        lastOpenedAt: new Date().toISOString(),
-      },
-      stillValid,
-    );
+    const recent = workRepoRecent(item, info);
+    await addRecent.mutateAsync(recent);
+    if (!valid()) return;
+    await onConnected(recent, valid);
   }
   if (cloning)
     return (
       <CloneRepoDialog
+        key={item.url}
         open
         onOpenChange={(open) => {
           if (!open) onClose();
         }}
         target={{
-          provider: "gitlab",
+          provider: item.provider,
           cloneUrl: `${new URL(item.url).origin}/${item.repoFullName}.git`,
           name: item.repoName,
         }}
+        reuseFor={item}
         onCloned={connect}
       />
     );
@@ -95,17 +98,29 @@ export function ConnectWorkRepoDialog({
             variant="outline"
             disabled={picking}
             onClick={() => {
+              const owner = connectionOwner.current;
+              const claimed = claimRepoOpen();
+              const stillValid = () =>
+                owner !== null &&
+                owner === connectionOwner.current &&
+                claimed();
               setPicking(true);
               void (async () => {
                 const path = await openDirectory({
                   directory: true,
                   multiple: false,
                 });
-                if (typeof path === "string")
-                  await connect(await validateRepo(path));
+                if (typeof path !== "string" || !stillValid()) return;
+                const info = await validateRepo(path);
+                if (!stillValid()) return;
+                await connect(info, stillValid);
               })()
-                .catch(toastError)
-                .finally(() => setPicking(false));
+                .catch((error) => {
+                  if (stillValid()) toastError(error);
+                })
+                .finally(() => {
+                  if (owner === connectionOwner.current) setPicking(false);
+                });
             }}
           >
             {picking ? "Opening…" : "Choose local repository"}

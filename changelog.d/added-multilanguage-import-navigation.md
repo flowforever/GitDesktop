@@ -1,0 +1,1 @@
+- Follow repository-local imports, modules and includes in JavaScript/TypeScript, Python, Go, Rust, Java/Kotlin, C/C++, C#, PHP, Ruby, Swift and Dart, including JavaScript/TypeScript script imports in Vue, Svelte and Astro. Packages with several source files offer a searchable file chooser before opening a target.

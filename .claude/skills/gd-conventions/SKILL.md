@@ -564,9 +564,11 @@ and table row are the reference).
   from the forge's pinned base/head metadata; a forge patch's line counts alone
   cannot prove its before side complete.
 - MR import links use `PrCodeImportLinks`, `usePrImportNavigation`, and
-  `pr-import-resolution`: decorate only code HTML islands or native CodeMirror
-  marks; resolve against exact snapshot paths/configuration. Deferred landings
-  check the navigation epoch, live slot and request identity after reads.
+  the language-specific scanner/resolver dispatch in `code-import-languages`
+  and `code-import-resolution`: decorate only code HTML islands or native
+  CodeMirror marks; resolve against exact snapshot paths/configuration. Deferred
+  landings and package-file choices check the navigation epoch, live slot and
+  request identity after reads.
 - The diff panes swap files through a two-slot hold: `useFileSlots` +
   `FileSlots` in `src/features/diff/file-slot.tsx` is the reference
   implementation (the Changes pane and every file-rail host render it; it

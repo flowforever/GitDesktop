@@ -1,6 +1,7 @@
 import CodeMirror, { Decoration, EditorView } from "@uiw/react-codemirror";
 import { useMemo } from "react";
-import { PR_CODE_IMPORT_MAX_CHARS, scanPrCodeImports } from "./pr-code-imports";
+import { scanCodeImports, supportsCodeImports } from "./code-import-languages";
+import { PR_CODE_IMPORT_MAX_CHARS } from "./pr-code-imports";
 
 /** The large-file editor stays off the ordinary highlighted-source path. */
 export default function PrSourceEditor({
@@ -19,19 +20,20 @@ export default function PrSourceEditor({
   const extensions = useMemo(
     () =>
       !importLinks ||
-      !/\.[cm]?[jt]sx?$/i.test(path) ||
+      !supportsCodeImports(path) ||
       text.length > PR_CODE_IMPORT_MAX_CHARS
         ? []
         : [
             EditorView.decorations.of(
               Decoration.set(
-                scanPrCodeImports(text, /\.[jt]sx$/i.test(path)).map((item) =>
+                scanCodeImports(text, path).map((item) =>
                   Decoration.mark({
                     tagName: "a",
                     attributes: {
                       href: "#mr-import",
                       "data-pr-code-import": item.specifier,
                       "data-pr-code-source": path,
+                      ...(item.kind ? { "data-pr-code-kind": item.kind } : {}),
                       "aria-label": item.specifier,
                       title: "Open import at MR head",
                       draggable: "false",

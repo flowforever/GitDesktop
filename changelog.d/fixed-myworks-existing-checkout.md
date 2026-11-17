@@ -1,0 +1,1 @@
+- My works checks known local repository locations before offering to connect or clone an MR. Existing matching checkouts at an MR clone destination are verified and reused, avoiding a duplicate clone into an occupied directory.

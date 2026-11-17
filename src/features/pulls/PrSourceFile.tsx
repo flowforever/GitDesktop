@@ -264,7 +264,11 @@ function SourceBody({
           tabIndex={0}
           className="h-full overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
         >
-          <HighlightedCode path={path} content={content.text} />
+          <HighlightedCode
+            path={path}
+            content={content.text}
+            htmlFallback={importLinks}
+          />
         </div>
       );
   }

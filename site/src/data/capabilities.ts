@@ -355,7 +355,7 @@ export const capabilities: Capability[] = [
   {
     group: "Pull requests & review",
     label:
-      "Clickable JavaScript and TypeScript imports — open relative paths, configured aliases and workspace files at the request's head and reveal them in the tree",
+      "Clickable imports for JavaScript/TypeScript, Python, Go, Rust, Java/Kotlin, C/C++, C#, PHP, Ruby, Swift and Dart — resolve repository files at the request's head, with a file chooser for packages",
   },
   {
     group: "Pull requests & review",
@@ -585,6 +585,11 @@ export const capabilities: Capability[] = [
       "My works — a GitLab home with six work categories, native Todos and complete MR details in separate app tabs; pinned My works and Repositories navigation",
     ai: false,
     highlight: true,
+  },
+  {
+    group: "Repository & workspace",
+    label:
+      "My works discovers existing checkouts in known repository locations and reuses verified MR clone destinations",
   },
   {
     group: "Repository & workspace",

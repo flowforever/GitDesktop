@@ -307,8 +307,11 @@ merge and local Git capabilities as the repository view, with the same permissio
 checks and confirmations.
 
 GitDesktop verifies the matching local repository and can use a worktree already
-holding the MR branch. When it cannot find a checkout, choose an existing one or
-clone the project to continue. Opening a detail tab does not check out a branch.
+holding the MR branch. It also checks known repository locations when a checkout
+is missing from the saved list. An existing repository at the MR's clone
+destination is reused only after its origin is verified. When no matching checkout
+is found, choose an existing one or clone the project to continue. Opening a
+detail tab does not check out a branch.
 
 Switch tabs to keep several MRs available. The pinned **My works** tab keeps the
 home filter and scroll position. The adjacent pinned **Repositories** tab opens
@@ -1605,13 +1608,18 @@ toolbar with the view toggle. Its up/down arrows jump between change blocks in
 the file, including in Full file view. File and change navigation are also
 available from the command palette.
 
-Click a JavaScript or TypeScript **import path** in Diff, Full file or source
-preview to open its target at the request's head commit and reveal it in the tree.
-Unchanged targets switch the sidebar to **All files**. Relative imports, configured
-TypeScript or JavaScript path aliases, and workspace package entry points use
-configuration from the same snapshot. An unresolved or external import leaves the
-current file open and shows a message. Finish an open line-comment draft before
-following an import.
+Click an **import, module or include path** in Diff, Full file or source preview
+to open its target at the request's head commit and reveal it in the tree.
+Supported languages are JavaScript/TypeScript, Python, Go, Rust, Java/Kotlin,
+C/C++, C#, PHP, Ruby, Swift and Dart. Vue/Svelte script blocks and Astro
+frontmatter support their JavaScript/TypeScript imports. Relative paths, module
+roots and supported project configuration come from the same snapshot.
+When a package or namespace has several source files, choose a file from the
+searchable list; arrow keys move the selection and Enter opens it. Unchanged
+targets switch the sidebar to **All files**. Standard libraries and dependencies
+outside the request's repository cannot be opened here. An unresolved import
+leaves the current file open and shows a message. Finish an open line-comment
+draft before following an import.
 
 What you can *do* here follows your access on the repository: when you lack the access an
 action needs — push access to **merge** or to flip a pull request between **draft** and

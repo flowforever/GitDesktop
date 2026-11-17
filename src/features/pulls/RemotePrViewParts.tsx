@@ -87,6 +87,7 @@ import { PrChangesNav } from "./PrChangesNav";
 import { PrCodeImportLinks } from "./PrCodeImportLinks";
 import { PrFilesTree, type PrTreeFile } from "./PrFilesTree";
 import { PrFullFileLoading } from "./PrFullFileLoading";
+import { PrImportTargetPicker } from "./PrImportTargetPicker";
 import { ReviewThreadCard, type SuggestionApply } from "./ReviewThreads";
 import { usePrImportNavigation } from "./usePrImportNavigation";
 
@@ -692,6 +693,15 @@ export function PrFilesPane({
           </FileSlots>
         </div>
       </main>
+      {importLinks.choices && (
+        <PrImportTargetPicker
+          key={importLinks.choices.request}
+          specifier={importLinks.choices.specifier}
+          paths={importLinks.choices.paths}
+          onChoose={importLinks.chooseTarget}
+          onClose={importLinks.dismissChoices}
+        />
+      )}
     </DetailRailRow>
   );
 }

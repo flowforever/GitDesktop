@@ -458,10 +458,13 @@ in one click.
   changes and their parents. For GitLab MRs, **Diff / Full file** switches a changed
   file between its patch and complete before-and-after comparison. The view fetches
   missing commit objects without switching your branch.
-- **Follow imports while reviewing**: click a JavaScript or TypeScript import
-  path in a diff or source preview to open its file at the request's head and
-  reveal it in the tree. Relative imports, configured path aliases and workspace
-  packages resolve from that snapshot; unchanged targets open in **All files**.
+- **Follow imports while reviewing**: click an import, module or include path
+  in a diff or source preview to open its file at the request's head and reveal
+  it in the tree. Supports JavaScript/TypeScript, Python, Go, Rust, Java/Kotlin,
+  C/C++, C#, PHP, Ruby, Swift and Dart, plus JavaScript/TypeScript script blocks
+  in Vue/Svelte and Astro frontmatter. Paths and project configuration resolve
+  from that snapshot. Packages with several source files offer a file chooser;
+  unchanged targets open in **All files**.
 - **Open, edit, merge**: review, comment, approve, edit, and merge (merge &
   squash on all three; rebase on GitHub, fast-forward on Bitbucket) without
   the browser. Labels and assignees on GitHub & GitLab (set them when you
@@ -1038,7 +1041,9 @@ configured in `glab`. Six categories keep different kinds of work separate:
 
 MR rows open complete details in separate, closable application tabs. Opening
 an MR again selects its existing tab. GitDesktop uses a verified local checkout
-or worktree; if none is available, choose a checkout or clone the project first.
+or worktree, checking known repository locations before asking you to connect.
+An existing checkout at the MR's clone destination is reused after its origin
+is verified. If none is available, choose a checkout or clone the project first.
 Comments and review drafts remain associated with their MR as you switch tabs.
 The pinned **My works** tab keeps your place in the list. The adjacent pinned
 **Repositories** tab opens the repository chooser without closing your MR tabs.

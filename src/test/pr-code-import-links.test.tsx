@@ -178,6 +178,41 @@ function renderDiff({
 }
 
 describe("MR import links in actual code surfaces", () => {
+  it.each([
+    ["src/main.py", "from .helper import Thing\n", ".helper", undefined],
+    ["src/lib.rs", "use crate::model;\n", "crate::model", "rust-use"],
+    ["lib/main.dart", "import 'helper.dart';\n", "helper.dart", undefined],
+  ] as const)(
+    "follows a native import in %s without changing source text",
+    async (path, source, specifier, kind) => {
+      const onOpen = vi.fn();
+      const { container } = render(
+        <PrCodeImportLinks path={path} onOpen={onOpen}>
+          <HighlightedCode path={path} content={source} htmlFallback />
+        </PrCodeImportLinks>,
+      );
+      const link = await screen.findByRole("link", { name: specifier });
+      expect(container.querySelector("pre")).toHaveTextContent(source.trim());
+      await userEvent.click(link);
+      if (kind)
+        expect(onOpen).toHaveBeenCalledExactlyOnceWith(specifier, path, kind);
+      else expect(onOpen).toHaveBeenCalledExactlyOnceWith(specifier, path);
+    },
+  );
+
+  it("escapes plain source markup before decorating imports", async () => {
+    const source =
+      'import "helper.dart";\nconst html = "<img src=x onerror=alert(1)> & <script>bad()</script>";';
+    const { container } = render(
+      <PrCodeImportLinks path="main.dart" onOpen={vi.fn()}>
+        <HighlightedCode path="main.dart" content={source} htmlFallback />
+      </PrCodeImportLinks>,
+    );
+    await screen.findByRole("link", { name: "helper.dart" });
+    expect(container.querySelector("pre")?.textContent).toBe(source);
+    expect(container.querySelector("img,script")).toBeNull();
+  });
+
   it("uses JSX grammar for preview islands while keeping real expression imports clickable", async () => {
     const source =
       'const node = <p>import value from "./example";</p>; const loader = import("./actual");';
