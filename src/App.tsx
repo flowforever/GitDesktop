@@ -14,7 +14,8 @@ import { ExploreScreen } from "@/features/explore/ExploreScreen";
 import { HelpScreen } from "@/features/help/HelpScreen";
 import { MyWorkScreen } from "@/features/mywork/MyWorkScreen";
 import {
-  closeMrDocument,
+  closeDocumentTab,
+  useWorkTabNavigation,
   WorkDocumentBar,
 } from "@/features/mywork/WorkDocumentBar";
 import { RepoNotificationsDialogHost } from "@/features/notifications/RepoNotificationsDialog";
@@ -55,7 +56,11 @@ import {
   useSettings,
 } from "@/lib/settings/queries";
 import { type RepoTab, useUiStore } from "@/lib/stores/ui";
-import { documentId, workItemFromDocument } from "@/lib/stores/work-documents";
+import {
+  focusedRepositoryDocument,
+  focusedWorkDocument,
+  workItemFromDocument,
+} from "@/lib/stores/work-documents";
 import { COLD_INSTANCE_ID, COLD_START } from "@/lib/test-mode";
 import { nextTheme, THEME_LABELS } from "@/lib/theme";
 import { toastError } from "@/lib/toast";
@@ -67,23 +72,9 @@ const NOTHING_HIDDEN: readonly RepoTab[] = [];
 
 function App() {
   const view = useUiStore((s) => s.view);
-  const focusedDocument = useUiStore((s) => {
-    if (
-      s.view !== "repo" ||
-      s.repoTab !== "pulls" ||
-      s.selectedPr?.kind !== "remote"
-    )
-      return null;
-    const doc = s.workDocuments.documents.find(
-      (d) => documentId(d) === s.workDocuments.activeId,
-    );
-    return doc &&
-      doc.repoPath === s.repoPath &&
-      String(doc.number) === s.selectedPr.id
-      ? s.workDocuments.activeId
-      : null;
-  });
-  const documentCount = useUiStore((s) => s.workDocuments.documents.length);
+  const focusedDocument = useUiStore(focusedWorkDocument);
+  const focusedRepository = useUiStore(focusedRepositoryDocument);
+  const focusedTab = focusedDocument ?? focusedRepository;
   const documentConnection = useUiStore((s) => s.workDocumentConnection);
   const openSettings = useUiStore((s) => s.openSettings);
   const openMcpBrowse = useUiStore((s) => s.openMcpBrowse);
@@ -312,34 +303,15 @@ function App() {
     () => useUiStore.getState().openRepositories(),
     !dialogOpen,
   );
-  const cycleDocument = (direction: number) => {
-    const s = useUiStore.getState();
-    const ids = [null, ...s.workDocuments.documents.map(documentId)];
-    const index =
-      s.view === "mywork"
-        ? 0
-        : Math.max(0, ids.indexOf(s.workDocuments.activeId));
-    const next = ids[(index + direction + ids.length) % ids.length];
-    if (next === null) s.openMyWork();
-    else s.activateWorkDocument(next);
-  };
-  const workDocumentsVisible = view === "mywork" || focusedDocument !== null;
-  useHotkeyAction(
-    "work-next-document",
-    () => cycleDocument(1),
-    workDocumentsVisible && documentCount > 0 && !dialogOpen,
-  );
-  useHotkeyAction(
-    "work-previous-document",
-    () => cycleDocument(-1),
-    workDocumentsVisible && documentCount > 0 && !dialogOpen,
-  );
+  const workTabsVisible =
+    view === "mywork" || view === "welcome" || view === "repo";
+  useWorkTabNavigation(workTabsVisible && !dialogOpen);
   useHotkeyAction(
     "work-close-document",
     () => {
-      if (focusedDocument) void closeMrDocument(focusedDocument);
+      if (focusedTab) void closeDocumentTab(focusedTab);
     },
-    focusedDocument !== null && !dialogOpen,
+    focusedTab !== null && !dialogOpen,
   );
   useHotkeyAction("toggle-notifications", toggleActivity);
   useHotkeyAction("show-shortcuts", () => setShortcutsOpen(true));
@@ -400,22 +372,37 @@ function App() {
           scrollbar, and the root never becomes a scroll container that a focus
           or scrollIntoView could shift with no scrollbar to undo it. */}
       <div className="flex h-screen flex-col overflow-clip">
-        {workDocumentsVisible && <WorkDocumentBar />}
-        {view === "welcome" && <WelcomeScreen />}
+        {workTabsVisible && <WorkDocumentBar />}
+        {view === "welcome" && (
+          <div
+            id="work-repositories-panel"
+            role="tabpanel"
+            aria-labelledby="work-tab-repositories"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <WelcomeScreen />
+          </div>
+        )}
         {view === "repo" && (
           <div
-            id="work-mr-panel"
-            role={focusedDocument ? "tabpanel" : undefined}
-            aria-labelledby={
+            id={
               focusedDocument
-                ? `work-tab-${encodeURIComponent(focusedDocument)}`
-                : undefined
+                ? "work-mr-panel"
+                : focusedRepository
+                  ? "work-repository-panel"
+                  : "work-repositories-panel"
+            }
+            role="tabpanel"
+            aria-labelledby={
+              focusedTab
+                ? `work-tab-${encodeURIComponent(focusedTab)}`
+                : "work-tab-repositories"
             }
             className="flex min-h-0 flex-1 flex-col"
           >
             <MrDocumentDraftScope id={focusedDocument}>
               <RepositoryView
-                key={focusedDocument ?? "repository"}
+                key={focusedTab ?? "repository"}
                 detailOnly={focusedDocument !== null}
               />
             </MrDocumentDraftScope>

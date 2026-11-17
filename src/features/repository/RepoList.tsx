@@ -156,11 +156,13 @@ export function RepoList({
   onOpened,
   onAliasRepo,
   onRemoveRepo,
+  fillHeight = false,
 }: {
   currentPath?: string | null;
   onOpened?: () => void;
   onAliasRepo: (repo: RecentRepo) => void;
   onRemoveRepo: (repo: RecentRepo) => void;
+  fillHeight?: boolean;
 }) {
   const settings = useSettings();
   const recents = settings.data?.recentRepos ?? [];
@@ -507,7 +509,7 @@ export function RepoList({
   };
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className={cn("flex min-h-0 flex-col", fillHeight && "md:flex-1")}>
       <div className={FILTER_ROW_CLASS}>
         <Input
           // the filter is the keyboard entry point of this surface
@@ -534,7 +536,14 @@ export function RepoList({
           className={FILTER_INPUT_CLASS}
         />
       </div>
-      <ScrollArea className={LIST_VIEWPORT_CLASS} ref={listRef}>
+      <ScrollArea
+        className={cn(
+          LIST_VIEWPORT_CLASS,
+          fillHeight &&
+            "md:flex-1 md:overflow-hidden md:**:data-[slot=scroll-area-viewport]:max-h-none",
+        )}
+        ref={listRef}
+      >
         <ContextMenu
           onOpenChange={(isOpen) => {
             setMenuOpen(isOpen);

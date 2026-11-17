@@ -29,6 +29,34 @@ beforeEach(() => {
 });
 
 describe("My works home", () => {
+  it("opens new verified MR documents without replacing a stack member's tab", async () => {
+    const original = {
+      host: "git.test",
+      repoFullName: "team/a",
+      number: 7,
+      title: "Original member",
+      repoPath: "/repos/a",
+      repoName: "a",
+    };
+    store().openPr({
+      kind: "remote",
+      ref: "7",
+      repoPath: original.repoPath,
+      repoName: original.repoName,
+      section: null,
+      document: original,
+    });
+    const next = { ...original, number: 8, title: "Next member" };
+    await store().activateWorkDocument(next);
+    expect(store().workDocuments.documents.map((doc) => doc.number)).toEqual([
+      7, 8,
+    ]);
+    expect(store().selectedPr?.id).toBe("8");
+    await store().activateWorkDocument(next);
+    expect(store().workDocuments.documents).toHaveLength(2);
+    expect(store().workDocuments.documents[0].title).toBe("Original member");
+  });
+
   it("starts at home and returns there after closing a repository", () => {
     expect(store().view).toBe("mywork");
     store().openRepo({ root: "/repos/a", name: "a" });

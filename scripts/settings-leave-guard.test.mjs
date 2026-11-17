@@ -48,7 +48,7 @@ const BRANCH_SWITCHER = "src/features/repository/BranchSwitcher.tsx";
 const JUMP_NAVIGATORS = ["openPr", "openRun", "openAgentTab", "openRepoView"];
 
 /** The navigators that hold a cross-repo landing on the repo-shell warm-up. */
-const HELD_NAVIGATORS = [...JUMP_NAVIGATORS, "openIssue"];
+const HELD_NAVIGATORS = [...JUMP_NAVIGATORS, "openIssue", "openRepo"];
 
 /** View writers that never leave Settings through the guard, each with why. */
 const EXEMPT = {
@@ -619,8 +619,8 @@ function footerProblems(text) {
 /** Problems with the landing side effects, `[]` when pinned: each jump
  *  navigator's transition callback calls `target.onApplied?.();` once, after
  *  its stillValid refusal and its set, openRepo's calls `opts?.onApplied?.();`
- *  once after its set, and openRepo's resume thunk forwards its opts, so a held
- *  open keeps its `onApplied`. */
+ *  once after its refusal and set, and both openRepo resume thunks forward its
+ *  opts, so a held open keeps its `onApplied`. */
 function onAppliedProblems(text) {
   const masked = maskNonCode(text, false);
   const obj = storeObject(masked);
@@ -660,19 +660,20 @@ function onAppliedProblems(text) {
     const setClose = set ? matchBrace(body, set.index + set[0].length - 1) : -1;
     if (setClose === -1 || at < setClose)
       problems.push(`${name}'s onApplied runs before its set`);
-    if (name === "openRepo") continue;
     const refuse = body.indexOf(
-      "if (target.stillValid?.(epochAtRequest) === false) return;",
+      name === "openRepo"
+        ? "if (opts?.stillValid?.(epochAtRequest) === false) return;"
+        : "if (target.stillValid?.(epochAtRequest) === false) return;",
     );
     if (refuse === -1 || at < refuse)
       problems.push(`${name}'s onApplied runs ahead of its stillValid refusal`);
   }
   if (
-    !/interceptSettingsLeave\(\(\) => get\(\)\.openRepo\(info, opts\)\)/.test(
-      masked,
-    )
+    (values.get("openRepo") ?? "").split(
+      "interceptSettingsLeave(() => get().openRepo(info, opts))",
+    ).length !== 3
   )
-    problems.push("openRepo's resume thunk drops its opts");
+    problems.push("openRepo's two resume thunks no longer both forward opts");
   return problems;
 }
 
@@ -688,7 +689,9 @@ function onAppliedProblems(text) {
  *  with the `stillValid` refusal, ahead of any `beforeSelect`. The hold's
  *  callback is exactly that refusal, then
  *  `if (interceptSettingsLeave(() => get().<itself>(target))) return; land();`,
- *  so a jump its caller retired yields silently: typing into a clean Settings
+ *  openRepo pins the same shape with `info, opts`, its explicit bypass at entry,
+ *  and warm-up limited to cross-repo document activations. This lets a jump its
+ *  caller retired yield silently: typing into a clean Settings
  *  registers the guard without an epoch bump, so only this re-check stops a held
  *  landing leaving unsaved edits unprompted. */
 function heldLandingProblems(text) {
@@ -735,15 +738,21 @@ function heldLandingProblems(text) {
       problems.push(`${name} not found`);
       continue;
     }
-    const head = new RegExp(
-      `^\\s*\\(target\\)\\s*=>\\s*\\{\\s*if \\(interceptSettingsLeave\\(\\(\\) => get\\(\\)\\.${name}\\(target\\)\\)\\) return;\\s*const epochAtRequest = bumpEpochNow\\(\\);\\s*const motion = repoViewMotion\\(\\);\\s*const land = \\(\\) =>\\s*startViewTransition\\(`,
-    ).exec(value);
-    if (
-      head &&
-      !/^\(\)\s*=>\s*\{\s*if \(target\.stillValid\?\.\(epochAtRequest\) === false\) return;/.test(
-        value.slice(head[0].length),
-      )
-    )
+    const repositoryOpen = name === "openRepo";
+    const head = repositoryOpen
+      ? /^\s*\(info, opts\)\s*=>\s*\{\s*if\s*\(\s*!opts\?\.bypassLeaveGuard &&\s*interceptSettingsLeave\(\(\) => get\(\)\.openRepo\(info, opts\)\)\s*\)\s*return;\s*const epochAtRequest = bumpEpochNow\(\);\s*const motion = repoViewMotion\(\);\s*const land = \(\) =>\s*startViewTransition\(/.exec(
+          value,
+        )
+      : new RegExp(
+          `^\\s*\\(target\\)\\s*=>\\s*\\{\\s*if \\(interceptSettingsLeave\\(\\(\\) => get\\(\\)\\.${name}\\(target\\)\\)\\) return;\\s*const epochAtRequest = bumpEpochNow\\(\\);\\s*const motion = repoViewMotion\\(\\);\\s*const land = \\(\\) =>\\s*startViewTransition\\(`,
+        ).exec(value);
+    const validity = repositoryOpen
+      ? "opts\\?\\.stillValid"
+      : "target\\.stillValid";
+    const refusal = new RegExp(
+      `^\\(\\)\\s*=>\\s*\\{\\s*if \\(${validity}\\?\\.\\(epochAtRequest\\) === false\\) return;`,
+    );
+    if (head && !refusal.test(value.slice(head[0].length)))
       problems.push(
         `${name}'s landing doesn't open with its stillValid refusal`,
       );
@@ -751,9 +760,10 @@ function heldLandingProblems(text) {
     const tail =
       landClose === -1
         ? null
-        : /^\s*;\s*const warm =\s*get\(\)\.repoPath !== target\.repoPath\s*\?\s*claimWarmRepoShell\(target\.repoPath\)\s*:\s*null;\s*if \(!warm\) \{\s*land\(\);\s*return;\s*\}\s*holdNavigation\(/.exec(
-            value.slice(landClose + 1),
-          );
+        : (repositoryOpen
+            ? /^\s*;\s*const warm =\s*opts\?\.documentId && get\(\)\.repoPath !== info\.root\s*\?\s*claimWarmRepoShell\(info\.root\)\s*:\s*null;\s*if \(!warm\) \{\s*land\(\);\s*return;\s*\}\s*holdNavigation\(/
+            : /^\s*;\s*const warm =\s*get\(\)\.repoPath !== target\.repoPath\s*\?\s*claimWarmRepoShell\(target\.repoPath\)\s*:\s*null;\s*if \(!warm\) \{\s*land\(\);\s*return;\s*\}\s*holdNavigation\(/
+          ).exec(value.slice(landClose + 1));
     const callOpen = tail ? landClose + tail[0].length : -1;
     const callClose = tail ? matchBrace(value, callOpen) : -1;
     if (callClose === -1 || !/^\s*;\s*\}\s*$/.test(value.slice(callClose + 1)))
@@ -785,7 +795,7 @@ function heldLandingProblems(text) {
       continue;
     }
     const guard = new RegExp(
-      `^\\{\\s*if \\(target\\.stillValid\\?\\.\\(epochAtRequest\\) === false\\) return;\\s*if \\(interceptSettingsLeave\\(\\(\\) => get\\(\\)\\.${name}\\(target\\)\\)\\) return;\\s*land\\(\\);\\s*\\}$`,
+      `^\\{\\s*if \\(${validity}\\?\\.\\(epochAtRequest\\) === false\\) return;\\s*if \\(interceptSettingsLeave\\(\\(\\) => get\\(\\)\\.${name}\\(${repositoryOpen ? "info, opts" : "target"}\\)\\)\\) return;\\s*land\\(\\);\\s*\\}$`,
     );
     if (!guard.test(value.slice(bodyOpen, bodyClose + 1)))
       problems.push(
@@ -961,12 +971,24 @@ const once = (from, to) => (s) => s.replace(from, () => to);
 test("async navigators accept a guarded multiline arrow and still reject missing or redirected guards", () => {
   const text = source(UI);
   const anchor = "    openHelp: () => {";
-  const guard = "if (interceptSettingsLeave(() =>\n get().asyncProbe())) return;";
-  const fixture = text.replace(anchor, `    asyncProbe: async () => { ${guard} bumpEpochNow(); get().openMyWork(); },\n${anchor}`);
+  const guard =
+    "if (interceptSettingsLeave(() =>\n get().asyncProbe())) return;";
+  const fixture = text.replace(
+    anchor,
+    `    asyncProbe: async () => { ${guard} bumpEpochNow(); get().openMyWork(); },\n${anchor}`,
+  );
   assert.notEqual(fixture, text, "the navigator fixture must be inserted");
   assert.deepEqual(viewWriterProblems(fixture), []);
-  assert.ok(viewWriterProblems(fixture.replace(guard, "")).some((problem) => problem.includes("asyncProbe")));
-  assert.ok(viewWriterProblems(fixture.replace("get().asyncProbe()", "get().openHelp()")).some((problem) => problem.includes("asyncProbe")));
+  assert.ok(
+    viewWriterProblems(fixture.replace(guard, "")).some((problem) =>
+      problem.includes("asyncProbe"),
+    ),
+  );
+  assert.ok(
+    viewWriterProblems(
+      fixture.replace("get().asyncProbe()", "get().openHelp()"),
+    ).some((problem) => problem.includes("asyncProbe")),
+  );
 });
 
 test("every view writer in the ui store consults the leave guard or is exempt", () => {
@@ -1513,6 +1535,15 @@ test("the navigators run onApplied only once their landing applies", () => {
     once("        opts?.onApplied?.();\n", ""),
     // A held open resumed without its opts loses its onApplied.
     once("get().openRepo(info, opts))", "get().openRepo(info))"),
+    once(
+      "get().openRepo(info, opts))) return;\n        land();",
+      "get().openRepo(info))) return;\n        land();",
+    ),
+    // An explicit repository activation can retire before its transition lands.
+    once(
+      "          if (opts?.stillValid?.(epochAtRequest) === false) return;\n",
+      "",
+    ),
   );
 });
 
@@ -1520,6 +1551,36 @@ test("a held cross-repo jump re-runs the leave guard before it lands", () => {
   pin(
     heldLandingProblems,
     source(UI),
+    // Repository document activation pins both retire checks, the resumed opts,
+    // and a warm-up only for document activations targeting another checkout.
+    once(
+      "        if (opts?.stillValid?.(epochAtRequest) === false) return;\n        if (interceptSettingsLeave(() => get().openRepo(info, opts))) return;\n",
+      "        if (interceptSettingsLeave(() => get().openRepo(info, opts))) return;\n",
+    ),
+    once(
+      "        if (opts?.stillValid?.(epochAtRequest) === false) return;\n        if (interceptSettingsLeave(() => get().openRepo(info, opts))) return;\n",
+      "        if (interceptSettingsLeave(() => get().openRepo(info, opts))) return;\n        if (opts?.stillValid?.(epochAtRequest) === false) return;\n",
+    ),
+    once(
+      "        if (interceptSettingsLeave(() => get().openRepo(info, opts))) return;\n        land();\n",
+      "        land();\n",
+    ),
+    once(
+      "get().openRepo(info, opts))) return;\n        land();",
+      "get().openRepo(info))) return;\n        land();",
+    ),
+    once(
+      "          if (opts?.stillValid?.(epochAtRequest) === false) return;\n",
+      "",
+    ),
+    once(
+      "        opts?.documentId && get().repoPath !== info.root\n",
+      "        get().repoPath !== info.root\n",
+    ),
+    once(
+      "        opts?.documentId && get().repoPath !== info.root\n",
+      "        opts?.documentId\n",
+    ),
     // Dropping the settle-time re-check: typing into Settings during the hold
     // would be left unprompted.
     once(

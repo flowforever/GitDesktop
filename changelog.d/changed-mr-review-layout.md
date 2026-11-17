@@ -1,0 +1,1 @@
+- Compact pull-request headers and stack lists start collapsed. GitLab stack members open in separate MR tabs, with title and state in the window title bar and section tabs beside the request actions. The files sidebar uses a folder tree with complete names and horizontal scrolling.

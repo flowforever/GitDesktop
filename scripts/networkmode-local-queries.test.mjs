@@ -79,6 +79,9 @@ const NETWORK_CALLEES = [
   "gitFetch",
   "gitFetchRemote",
   "gitFetchObjects",
+  "gitPrSnapshotFiles",
+  "gitPrSnapshotFile",
+  "gitPrSnapshotComparison",
   "gitPull",
   "gitPush",
   "forgeStatus",
@@ -139,6 +142,24 @@ const NETWORKED_ALWAYS = [
  *  second query in the file is never exempted along with it), and why the object stays
  *  without `networkMode: "always"`. An entry matching no offender fails. */
 const EXEMPT = [
+  {
+    file: "src/lib/git/queries/pr-snapshot.ts",
+    queryKey: '"pr-snapshot-file"',
+    reason:
+      "an explicit source read may hydrate a missing partial-clone object, so it waits for connectivity",
+  },
+  {
+    file: "src/lib/git/queries/pr-snapshot.ts",
+    queryKey: '"pr-snapshot-files"',
+    reason:
+      "an explicit All files read may fetch missing MR commit objects, so it waits for connectivity",
+  },
+  {
+    file: "src/lib/git/queries/pr-snapshot.ts",
+    queryKey: '"snapshot-comparison"',
+    reason:
+      "Reads GitLab comparison metadata and hydrates exact committed file objects; uncached comparisons require a network connection.",
+  },
   {
     file: "src/lib/automations/useBackgroundPrSync.ts",
     queryKey: '["background-pr-sync"]',

@@ -22,10 +22,17 @@ import { createOpenClaims } from "@/lib/stores/open-claims";
 import {
   closeDocument,
   documentId,
+  focusedRepositoryDocument,
+  focusedWorkDocument,
   type MrDocument,
   openDocument,
+  openRepositoryDocument,
+  rememberRepositoryDocument,
+  repositoryDocumentId,
   type WorkDocuments,
+  workDocumentTabs,
 } from "@/lib/stores/work-documents";
+import { toastError } from "@/lib/toast";
 import { startViewTransition } from "@/lib/view-transition";
 
 export type AppView =
@@ -313,7 +320,10 @@ export interface UiState {
   workCategory: WorkCategory;
   setWorkCategory: (category: WorkCategory) => void;
   openRepositories: () => void;
-  activateWorkDocument: (id: string, closeDocumentId?: string) => Promise<void>;
+  activateWorkDocument: (
+    target: string | MrDocument,
+    closeDocumentId?: string,
+  ) => Promise<void>;
   closeWorkDocument: (id: string) => void;
   updateWorkDocument: (
     id: string,
@@ -497,7 +507,13 @@ export interface UiState {
    *  never bumps the epoch; the request's bump counted the move. */
   openRepo: (
     info: RepoInfo,
-    opts?: { bypassLeaveGuard?: boolean; onApplied?: () => void },
+    opts?: {
+      bypassLeaveGuard?: boolean;
+      onApplied?: () => void;
+      documentId?: string;
+      closeDocumentId?: string;
+      stillValid?: (epoch: number) => boolean;
+    },
   ) => void;
   closeRepo: () => void;
   /** `closeRepo` that Settings' leave guard never holds, for the
@@ -874,6 +890,13 @@ export const useUiStore = create<UiState>()((set, get) => {
     }
   };
 
+  // History-aware writers commit their location and saved repository view in
+  // one notification; the recorder must not need a follow-up snapshot write.
+  const withRepositoryView = (s: UiState, patch: Partial<UiState>) => ({
+    ...patch,
+    workDocuments: rememberRepositoryDocument({ ...s, ...patch }),
+  });
+
   // One plain set, not a transition: a restore changes no top-level view. The view is
   // tested with an early return so this body never spells a view key (the leave-guard
   // scan classes any member that does as a view writer).
@@ -883,12 +906,14 @@ export const useUiStore = create<UiState>()((set, get) => {
     const step = restoreStep(s, delta, readNavAnchor);
     if (step === null) return;
     const epoch = s.interactionEpoch + 1;
-    set({
-      ...step.patch,
-      navHistory: step.navHistory,
-      interactionEpoch: epoch,
-      boardReturn: step.anchor ? { anchor: step.anchor, epoch } : null,
-    });
+    set(
+      withRepositoryView(s, {
+        ...step.patch,
+        navHistory: step.navHistory,
+        interactionEpoch: epoch,
+        boardReturn: step.anchor ? { anchor: step.anchor, epoch } : null,
+      }),
+    );
   };
 
   return {
@@ -925,19 +950,52 @@ export const useUiStore = create<UiState>()((set, get) => {
       if (interceptSettingsLeave(() => get().openRepositories())) return;
       bumpEpochNow();
       startViewTransition(() =>
-        set({ view: "welcome", previousView: "welcome" }),
+        set({
+          view: "welcome",
+          previousView: "welcome",
+          workDocuments: { ...get().workDocuments, activeId: null },
+        }),
       );
     },
-    activateWorkDocument: async (id, closeDocumentId) => {
+    activateWorkDocument: async (target, closeDocumentId) => {
       if (
         interceptSettingsLeave(() =>
-          get().activateWorkDocument(id, closeDocumentId),
+          get().activateWorkDocument(target, closeDocumentId),
         )
       )
         return;
-      const doc = get().workDocuments.documents.find(
+      const id = typeof target === "string" ? target : documentId(target);
+      const repository = get().workDocuments.repositories?.find(
+        (entry) => repositoryDocumentId(entry) === id,
+      );
+      if (repository) {
+        bumpEpochNow();
+        const claimed = claimRepoOpen();
+        try {
+          const info = await validateRepo(repository.repoPath);
+          if (!claimed()) return;
+          if (repositoryDocumentId({ repoPath: info.root }) !== id)
+            throw new Error(
+              "This checkout now resolves to another repository.",
+            );
+          get().openRepo(info, {
+            documentId: id,
+            closeDocumentId,
+            stillValid: (epoch) =>
+              get().interactionEpoch === epoch &&
+              get().workDocuments.repositories?.some(
+                (entry) => repositoryDocumentId(entry) === id,
+              ) === true,
+          });
+        } catch (error) {
+          if (claimed()) toastError(error);
+        }
+        return;
+      }
+      const existing = get().workDocuments.documents.find(
         (d) => documentId(d) === id,
       );
+      const doc = existing ?? (typeof target === "string" ? undefined : target);
       if (!doc) return;
       bumpEpochNow();
       const claimed = claimRepoOpen();
@@ -967,23 +1025,33 @@ export const useUiStore = create<UiState>()((set, get) => {
         closeDocumentId,
         stillValid: (epoch) =>
           get().interactionEpoch === epoch &&
-          get().workDocuments.documents.some(
-            (entry) => documentId(entry) === id,
-          ),
+          (!existing ||
+            get().workDocuments.documents.some(
+              (entry) => documentId(entry) === id,
+            )),
       });
     },
     closeWorkDocument: (id) => {
       if (interceptSettingsLeave(() => get().closeWorkDocument(id))) return;
       const state = get();
       const next = closeDocument(state.workDocuments, id);
-      if (state.workDocuments.activeId !== id || state.view !== "repo") {
+      const focusedDocument =
+        focusedWorkDocument(state) ?? focusedRepositoryDocument(state);
+      if (focusedDocument !== id) {
         bumpEpochNow();
-        set({ workDocuments: next });
+        set({
+          workDocuments:
+            state.view === "repo" && focusedDocument === null
+              ? { ...next, activeId: null }
+              : next,
+        });
         return;
       }
-      const doc = next.documents.find((d) => documentId(d) === next.activeId);
-      if (doc) {
-        void get().activateWorkDocument(documentId(doc), id);
+      const tab = workDocumentTabs(next).find(
+        (entry) => entry.id === next.activeId,
+      );
+      if (tab) {
+        void get().activateWorkDocument(tab.id, id);
         return;
       }
       bumpEpochNow();
@@ -1047,21 +1115,61 @@ export const useUiStore = create<UiState>()((set, get) => {
         interceptSettingsLeave(() => get().openRepo(info, opts))
       )
         return;
-      bumpEpochNow();
-      startViewTransition(() => {
-        set({
-          view: "repo",
-          previousView: "repo",
-          repoPath: info.root,
-          repoName: info.name,
-          repoTab: "changes",
-          // Clear the live fields; the previous repo's draft stays in
-          // commitDrafts (keyed by repo+branch) and CommitBox reloads the new
-          // repo's draft once its branch is known.
-          ...CROSS_REPO_RESET,
-        });
-        opts?.onApplied?.();
-      }, repoViewMotion());
+      const epochAtRequest = bumpEpochNow();
+      const motion = repoViewMotion();
+      const land = () =>
+        startViewTransition(() => {
+          if (opts?.stillValid?.(epochAtRequest) === false) return;
+          const saved = get().workDocuments.repositories?.find(
+            (entry) =>
+              repositoryDocumentId(entry) ===
+              repositoryDocumentId({ repoPath: info.root }),
+          );
+          const savedLocation = saved?.viewState;
+          const repoTab = savedLocation?.repoTab ?? "changes";
+          const location = savedLocation && {
+            ...savedLocation,
+            repoTab,
+            navHistory: pruneHiddenTabs(
+              savedLocation.navHistory,
+              get().navHiddenTabs,
+            ),
+          };
+          set({
+            ...CROSS_REPO_RESET,
+            ...location,
+            view: "repo",
+            previousView: "repo",
+            repoPath: info.root,
+            repoName: info.name,
+            repoTab,
+            workDocuments: openRepositoryDocument(
+              opts?.closeDocumentId
+                ? closeDocument(get().workDocuments, opts.closeDocumentId)
+                : get().workDocuments,
+              {
+                ...saved,
+                repoPath: info.root,
+                repoName: info.name,
+                viewState: location,
+              },
+            ),
+          });
+          opts?.onApplied?.();
+        }, motion);
+      const warm =
+        opts?.documentId && get().repoPath !== info.root
+          ? claimWarmRepoShell(info.root)
+          : null;
+      if (!warm) {
+        land();
+        return;
+      }
+      holdNavigation(warm, () => {
+        if (opts?.stillValid?.(epochAtRequest) === false) return;
+        if (interceptSettingsLeave(() => get().openRepo(info, opts))) return;
+        land();
+      });
     },
     closeRepo: () => {
       if (interceptSettingsLeave(() => get().closeRepo())) return;
@@ -1118,7 +1226,16 @@ export const useUiStore = create<UiState>()((set, get) => {
                     number: Number(target.ref),
                   },
                 )
-              : { ...get().workDocuments, activeId: null },
+              : {
+                  ...get().workDocuments,
+                  activeId: get().workDocuments.repositories?.find(
+                    (entry) =>
+                      repositoryDocumentId(entry) ===
+                      repositoryDocumentId({ repoPath: target.repoPath }),
+                  )
+                    ? repositoryDocumentId({ repoPath: target.repoPath })
+                    : null,
+                },
             // Switching repos clears the rest the way openRepo does; staying in
             // the same repo keeps your other selections and just retargets the PR.
             // The explicit PR keys come AFTER the spread so it can't null them.
@@ -1668,20 +1785,24 @@ export const useUiStore = create<UiState>()((set, get) => {
       const navHistory = syncLens(s, lens);
       if (navHistory === s.navHistory) return;
       // A re-seed drops the board entry a pending return was armed from.
-      if (navHistory.entries === s.navHistory.entries) set({ navHistory });
-      else set({ navHistory, boardReturn: null });
+      if (navHistory.entries === s.navHistory.entries)
+        set(withRepositoryView(s, { navHistory }));
+      else set(withRepositoryView(s, { navHistory, boardReturn: null }));
     },
     setNavHiddenTabs: (tabs) => {
-      const { navHiddenTabs, navHistory } = get();
+      const s = get();
+      const { navHiddenTabs, navHistory } = s;
       const next = new Set(tabs);
       const same =
         next.size === new Set(navHiddenTabs).size &&
         navHiddenTabs.every((tab) => next.has(tab));
       if (same) return;
-      set({
-        navHiddenTabs: tabs,
-        navHistory: pruneHiddenTabs(navHistory, tabs),
-      });
+      set(
+        withRepositoryView(s, {
+          navHiddenTabs: tabs,
+          navHistory: pruneHiddenTabs(navHistory, tabs),
+        }),
+      );
     },
     clearBoardReturn: () => set({ boardReturn: null }),
   };
@@ -1696,8 +1817,24 @@ export const useUiStore = create<UiState>()((set, get) => {
 // The outer pass reads the live state, so `navHistory` itself reads as changed in both.
 useUiStore.subscribe((next, prev) => {
   const hop = takeLinkHop();
-  const navHistory = recordNavigation(next, prev, hop, readNavAnchor);
-  if (navHistory !== next.navHistory) useUiStore.setState({ navHistory });
+  // A repository tab supplies its own history on arrival. Ordinary repo
+  // navigation still seeds a new trail when the checkout changes.
+  const restoredRepositoryHistory =
+    next.repoPath !== prev.repoPath &&
+    focusedRepositoryDocument(next) !== null &&
+    next.workDocuments.repositories?.some(
+      (document) =>
+        repositoryDocumentId(document) === next.workDocuments.activeId &&
+        document.viewState?.navHistory === next.navHistory,
+    );
+  const navHistory = restoredRepositoryHistory
+    ? next.navHistory
+    : recordNavigation(next, prev, hop, readNavAnchor);
+  const workDocuments = rememberRepositoryDocument(
+    navHistory === next.navHistory ? next : { ...next, navHistory },
+  );
+  if (navHistory !== next.navHistory || workDocuments !== next.workDocuments)
+    useUiStore.setState({ navHistory, workDocuments });
 });
 
 const repositoryOpenClaims = createOpenClaims(

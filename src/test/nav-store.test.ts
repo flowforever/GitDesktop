@@ -108,12 +108,14 @@ describe("repo switch and close", () => {
     });
   });
 
-  it("re-opening and switching repos start over; closing leaves nothing", () => {
+  it("re-opening retains its tab trail; a fresh repo starts over and closing clears the live trail", () => {
     enterRepo();
     st().setRepoTab("issues");
     st().setRepoTab("history");
     enterRepo();
-    expect(tabs()).toEqual(["changes"]);
+    expect(tabs()).toEqual(["changes", "issues", "history"]);
+    expect(st().repoTab).toBe("history");
+    expect(st().workDocuments.repositories).toHaveLength(1);
     st().setRepoTab("issues");
     useUiStore.setState({
       boardReturn: { anchor: anchor("p"), epoch: st().interactionEpoch },

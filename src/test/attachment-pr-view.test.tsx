@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkDocumentBar } from "@/features/mywork/WorkDocumentBar";
 import { LinkedIssuesField } from "@/features/pulls/LinkedIssuesField";
 import { RemotePrView } from "@/features/pulls/RemotePrView";
 import { attachmentDiscard, attachmentStage } from "@/lib/attachments/api";
@@ -28,7 +29,8 @@ import {
   forgeStatus,
   gitBranches,
 } from "@/lib/git/api";
-import { useSetPrDraft } from "@/lib/git/queries";
+import { repoOriginPath, validateRepo } from "@/lib/git/api/repo";
+import { prDetailsOptions, useSetPrDraft } from "@/lib/git/queries";
 import type {
   Branch,
   ForgeStatus,
@@ -41,6 +43,12 @@ import { loadSettings } from "@/lib/settings/api";
 import { DEFAULT_SETTINGS } from "@/lib/settings/heal";
 import { useConfirm } from "@/lib/stores/confirm";
 import { useUiStore } from "@/lib/stores/ui";
+
+const setWindowTitle = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("@tauri-apps/api/window", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tauri-apps/api/window")>()),
+  getCurrentWindow: () => ({ setTitle: setWindowTitle }),
+}));
 
 vi.mock("@/lib/settings/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/settings/api")>()),
@@ -58,6 +66,11 @@ vi.mock("@/lib/git/api", async (importOriginal) => ({
   forgePrEdit: vi.fn(),
   forgePrSetDraft: vi.fn(async () => undefined),
   gitBranches: vi.fn(),
+}));
+vi.mock("@/lib/git/api/repo", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/git/api/repo")>()),
+  repoOriginPath: vi.fn(),
+  validateRepo: vi.fn(),
 }));
 // The generator is observed at its hook; a test drives its draft callback.
 const generateFromDiff = vi.hoisted(() => vi.fn());
@@ -181,10 +194,18 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  setWindowTitle.mockClear();
   sessionSeq += 1;
   SESSION = sessionSeq.toString(16).padStart(32, "0");
   vi.mocked(loadSettings).mockResolvedValue(DEFAULT_SETTINGS);
   vi.mocked(forgeStatus).mockResolvedValue(GITLAB);
+  vi.mocked(validateRepo).mockResolvedValue({ root: REPO, name: "repo" });
+  vi.mocked(repoOriginPath).mockResolvedValue({
+    provider: "gitlab",
+    host: "gitlab.com",
+    authority: "gitlab.com",
+    path: "owner/repo",
+  });
   vi.mocked(forgePrView).mockImplementation(async () => pr());
   vi.mocked(forgePrApprovals).mockResolvedValue({
     viewerHasApproved: false,
@@ -225,13 +246,13 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function mount() {
+function mount(options: { windowTitleSuffix?: string } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <RemotePrView repoPath={REPO} number={7} />
+      <RemotePrView repoPath={REPO} number={7} {...options} />
     </QueryClientProvider>,
   );
   return client;
@@ -267,6 +288,350 @@ async function openPrEdit(extra: Record<string, boolean> = {}) {
   await waitFor(() => expect(editBox()).toBeInTheDocument());
   return client;
 }
+
+describe("RemotePrView header disclosure", () => {
+  it("moves the standalone MR title and state into the window title and its sections beside the actions", async () => {
+    useUiStore.setState({
+      repoTab: "pulls",
+      selectedPr: { kind: "remote", id: "7" },
+    });
+    const client = mount({ windowTitleSuffix: "GitDesktop (Dev)" });
+    await waitFor(() =>
+      expect(setWindowTitle).toHaveBeenLastCalledWith(
+        "open · Merge request seven #7 — GitDesktop (Dev)",
+      ),
+    );
+    const heading = screen.getByRole("heading", {
+      name: /Merge request seven/,
+    });
+    expect(heading).toHaveClass("sr-only");
+    const header = heading.closest("header")!;
+    const row = header.querySelector('[data-slot="detail-title-row"]')!;
+    for (const name of [
+      "Conversation (0)",
+      "Commits (0)",
+      "Files (0)",
+      "Review",
+      "Close",
+      "GitLab",
+    ]) {
+      expect(row).toContainElement(button(name));
+    }
+    expect(header.querySelector('[data-slot="badge"]')).toBeNull();
+    fireEvent.click(button("Commits (0)"));
+    expect(button("Commits (0)")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(button("Show merge request details"));
+    expect(button("Hide merge request details")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+
+    act(() =>
+      client.setQueryData(prDetailsOptions(REPO, 7, "origin").queryKey, {
+        ...pr(),
+        title: "Renamed request",
+        state: "CLOSED",
+        isDraft: true,
+      }),
+    );
+    await waitFor(() =>
+      expect(setWindowTitle).toHaveBeenLastCalledWith(
+        "closed · Renamed request #7 — GitDesktop (Dev)",
+      ),
+    );
+    expect(row).toContainElement(button("Reopen"));
+  });
+
+  it("keeps standalone section controls in the top row during loading", async () => {
+    const pending = deferred<PrDetails>();
+    vi.mocked(forgePrView).mockReturnValueOnce(pending.promise);
+    useUiStore.setState({
+      repoTab: "pulls",
+      selectedPr: { kind: "remote", id: "7" },
+    });
+    mount({ windowTitleSuffix: "GitDesktop (Dev)" });
+    const tab = await screen.findByRole("button", { name: "Conversation" });
+    const row = tab.closest('[data-slot="detail-title-row"]');
+    expect(row).not.toBeNull();
+    expect(row).toContainElement(
+      await screen.findByRole("button", { name: "GitLab" }),
+    );
+    expect(tab).toBeDisabled();
+    expect(row?.querySelector('[data-slot="badge"]')).toBeNull();
+    await waitFor(() =>
+      expect(setWindowTitle).toHaveBeenCalledWith(
+        "merge request #7 — GitDesktop (Dev)",
+      ),
+    );
+    await act(async () => pending.resolve(pr()));
+    await waitFor(() =>
+      expect(setWindowTitle).toHaveBeenLastCalledWith(
+        "open · Merge request seven #7 — GitDesktop (Dev)",
+      ),
+    );
+  });
+
+  it("places draft, close and merge controls beside checkout in the title row", async () => {
+    vi.mocked(forgeStatus).mockResolvedValue({
+      ...GITLAB,
+      implemented: {
+        ...GITLAB.implemented,
+        mrMerge: true,
+        mrDraftToggle: true,
+      },
+    } as ForgeStatus);
+    mount();
+    const heading = await screen.findByRole("heading", {
+      name: /Merge request seven/,
+    });
+    const header = heading.closest("header")!;
+    for (const name of ["Convert to draft", "Close", "Merge", "GitLab"]) {
+      const control = button(name);
+      expect(header).toContainElement(control);
+      expect(
+        control.closest('[data-slot="detail-title-actions"]'),
+      ).not.toBeNull();
+    }
+  });
+
+  it("keeps the reopened action in the title row of a closed MR", async () => {
+    vi.mocked(forgePrView).mockResolvedValue({ ...pr(), state: "CLOSED" });
+    mount();
+    const heading = await screen.findByRole("heading", {
+      name: /Merge request seven/,
+    });
+    expect(heading.closest("header")).toContainElement(button("Reopen"));
+  });
+
+  it("keeps the compact title controls in place while the MR is loading", async () => {
+    const pending = deferred<PrDetails>();
+    vi.mocked(forgePrView).mockReturnValueOnce(pending.promise);
+    mount();
+
+    const toggle = await screen.findByRole("button", {
+      name: "Show merge request details",
+    });
+    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const title = toggle.closest('[data-slot="detail-title"]');
+    expect(title?.querySelector('[data-slot="badge"]')).not.toBeNull();
+    const header = toggle.closest("header");
+    expect(header?.querySelector(".grid")).toBeNull();
+
+    await act(async () => pending.resolve(pr()));
+    await screen.findByText("Merge request seven");
+    expect(button("Show merge request details")).not.toBeDisabled();
+    expect(button("Show merge request details")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("keeps the same stack expanded but starts another stack collapsed", async () => {
+    const members = [7, 8].map((number, index) => ({
+      number,
+      title: `Stack member ${number}`,
+      state: "open",
+      position: index + 1,
+      headRefName: `feat-${number}`,
+      baseRefName: "main",
+    }));
+    const detailsFor = (number: number): PrDetails => ({
+      ...pr(),
+      number,
+      title: `Merge request ${number}`,
+      stack:
+        number === 10
+          ? null
+          : {
+              id: number === 9 ? "other-stack" : "shared-stack",
+              position: 1,
+              size: 2,
+            },
+      stackMembers: members,
+    });
+    vi.mocked(forgePrView).mockImplementation(async (_repo, number) =>
+      detailsFor(number),
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    for (const number of [7, 8, 9, 10]) {
+      client.setQueryData(
+        prDetailsOptions(REPO, number, "origin").queryKey,
+        detailsFor(number),
+      );
+    }
+    const tree = (number: number) => (
+      <QueryClientProvider client={client}>
+        <RemotePrView repoPath={REPO} number={number} />
+      </QueryClientProvider>
+    );
+    const view = render(tree(7));
+    await screen.findByText("Merge request 7");
+    fireEvent.click(button("Show stack members"));
+    view.rerender(tree(8));
+    await screen.findByText("Merge request 8");
+    expect(button("Hide stack members")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    view.rerender(tree(9));
+    await screen.findByText("Merge request 9");
+    expect(button("Show stack members")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    fireEvent.click(button("Show stack members"));
+    view.rerender(tree(10));
+    await screen.findByText("Merge request 10");
+    view.rerender(tree(9));
+    await screen.findByText("Merge request 9");
+    expect(button("Show stack members")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("opens a clicked stack member in another MR tab and reuses that tab", async () => {
+    const user = userEvent.setup();
+    const saved = useUiStore.getState();
+    const original = {
+      host: "gitlab.com",
+      repoFullName: "owner/repo",
+      number: 7,
+      title: "Merge request seven",
+      repoPath: REPO,
+      repoName: "repo",
+    };
+    vi.mocked(forgePrView).mockResolvedValue({
+      ...pr(),
+      stack: { id: "mr-7", position: 1, size: 2 },
+      stackMembers: [
+        {
+          number: 7,
+          title: "Merge request seven",
+          state: "open",
+          position: 1,
+          headRefName: "feat",
+          baseRefName: "main",
+        },
+        {
+          number: 8,
+          title: "Next stack member",
+          state: "open",
+          position: 2,
+          headRefName: "next",
+          baseRefName: "feat",
+        },
+      ],
+    });
+    try {
+      act(() => {
+        useUiStore.getState().openPr({
+          kind: "remote",
+          ref: "7",
+          repoPath: REPO,
+          repoName: "repo",
+          section: "conversation",
+          document: original,
+        });
+      });
+      mount();
+      await screen.findByRole("heading", { name: /Merge request seven/ });
+      render(<WorkDocumentBar />);
+      await user.click(button("Show stack members"));
+      await user.click(button(/#8.*Next stack member/));
+      await waitFor(() =>
+        expect(
+          screen.getByRole("tab", { name: /Next stack member/ }),
+        ).toHaveAttribute("aria-selected", "true"),
+      );
+      expect(
+        screen.getByRole("tab", { name: /Merge request seven/ }),
+      ).toBeVisible();
+      expect(useUiStore.getState().workDocuments.documents).toHaveLength(2);
+      await act(async () =>
+        useUiStore
+          .getState()
+          .activateWorkDocument(
+            JSON.stringify(["gitlab.com", "owner/repo", 7]),
+          ),
+      );
+      await user.click(button(/#8.*Next stack member/));
+      await waitFor(() =>
+        expect(useUiStore.getState().selectedPr?.id).toBe("8"),
+      );
+      expect(useUiStore.getState().workDocuments.documents).toHaveLength(2);
+    } finally {
+      act(() => useUiStore.setState(saved, true));
+    }
+  });
+
+  it("starts compact and toggles metadata by keyboard without hiding navigation", async () => {
+    const user = userEvent.setup();
+    const client = mount();
+    await screen.findByText("Merge request seven");
+    const toggle = button("Show merge request details");
+    const details = document.getElementById(
+      toggle.getAttribute("aria-controls")!,
+    );
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(details).not.toBeVisible();
+    expect(screen.getByText("open", { exact: true })).toBeVisible();
+    expect(button("GitLab")).toBeVisible();
+    expect(button("Conversation (0)")).toBeVisible();
+    expect(button("Files (0)")).toBeVisible();
+
+    toggle.focus();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(details).toBeVisible();
+    expect(screen.getByText("feat", { exact: true })).toBeVisible();
+    act(() => {
+      client.setQueryData(prDetailsOptions(REPO, 7, "origin").queryKey, {
+        ...pr(),
+        title: "Updated merge request seven",
+      });
+    });
+    await screen.findByText("Updated merge request seven");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard(" ");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(details).not.toBeVisible();
+    expect(button("Files (0)")).toBeVisible();
+  });
+
+  it("collapses the metadata when another merge request replaces the current one", async () => {
+    const user = userEvent.setup();
+    vi.mocked(forgePrView).mockImplementation(async (_repo, number) => ({
+      ...pr(),
+      number,
+      title: `Merge request ${number}`,
+    }));
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const tree = (number: number) => (
+      <QueryClientProvider client={client}>
+        <RemotePrView repoPath={REPO} number={number} />
+      </QueryClientProvider>
+    );
+    const view = render(tree(7));
+    await screen.findByText("Merge request 7");
+    await user.click(button("Show merge request details"));
+    expect(button("Hide merge request details")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    view.rerender(tree(8));
+    await screen.findByText("Merge request 8");
+    expect(button("Show merge request details")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+});
 
 describe("RemotePrView edit attachments", () => {
   it("holds Generate only while a save carrying images is pending (AC30)", async () => {

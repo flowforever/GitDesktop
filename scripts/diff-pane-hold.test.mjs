@@ -928,6 +928,8 @@ const SLOT_HOSTS = [
   "src/features/sessions/WorktreeChangesView.tsx",
 ];
 const NOT_SLOT_HOSTS = [
+  // One captured full-file comparison; PrFilesPane owns its enclosing slots.
+  "src/features/pulls/PrFullFileDiff.tsx",
   // A transcript step's inline diff: one file per step, no rail to swap.
   "src/features/sessions/AgentTranscript.tsx",
   // One file's proposed-resolution diff, inside its own resolve flow.

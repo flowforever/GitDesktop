@@ -19,9 +19,35 @@ import {
   parseModeChange,
   sectionFilePath,
   sectionIsBinary,
+  sectionOldFilePath,
   splitUnifiedDiff,
   typechangeHalves,
 } from "../src/lib/git/diff-split.ts";
+
+for (const [token, expected] of [
+  ["a/old/entry.ts", "old/entry.ts"],
+  ["a/old name/entry.ts\t", "old name/entry.ts"],
+  ['"a/caf\\303\\251/entry.ts"', "café/entry.ts"],
+  ['"a/old\\tname/entry.ts"', "old\tname/entry.ts"],
+  ["/dev/null", undefined],
+]) {
+  test(`old import source path decodes ${token}`, () => {
+    const section = `diff --git a/old/entry.ts b/new/entry.ts\n--- ${token}\n+++ b/new/entry.ts\n@@ -1 +1 @@\n-import old from './old';\n+import current from './current';\n`;
+    assert.equal(sectionOldFilePath(section), expected);
+    assert.equal(
+      sectionOldFilePath(section.replaceAll("\n", "\r\n")),
+      expected,
+    );
+  });
+}
+
+test("old import source never comes from a header-shaped content line", () => {
+  assert.equal(
+    sectionOldFilePath("@@ -1 +1 @@\n--- a/decoy.ts\n+next\n"),
+    undefined,
+  );
+  assert.equal(sectionOldFilePath("diff --git a/old.ts b/new.ts\n"), undefined);
+});
 
 // ---------------------------------------------------------------- headerShapes
 

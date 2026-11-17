@@ -180,11 +180,15 @@ function auditPaths(source, expected) {
 
 // Every call a child makes through the prop it is handed `pickPath` on.
 const PICK_PROP_CHILDREN = {
-  "src/features/pulls/RemotePrViewParts.tsx": {
+  "src/features/pulls/PrFilesTree.tsx": {
+    prop: "onSelectPath",
+    calls: [/^\s*onSelectPath\(row\.item\.path\);$/],
+  },
+  "src/features/pulls/PrChangedFilesNav.tsx": {
     prop: "onSelectPath",
     calls: [
-      /^\s*onActivate: \(file\) => onSelectPath\(file\.path\),$/,
-      /^\s*onClick=\{\(\) => onSelectPath\(file\.path\)\}$/,
+      /^\s*onSelectPath\(previousPath\);$/,
+      /^\s*onSelectPath\(nextPath\);$/,
     ],
   },
   "src/features/pulls/CommitComments.tsx": {
@@ -221,6 +225,39 @@ for (const [file, spec] of Object.entries(PICK_PROP_CHILDREN)) {
     assert.deepEqual(auditChild(read(file), spec), []);
   });
 }
+
+test("PrFilesPane routes tree picks through its user selection handler", () => {
+  const text = read("src/features/pulls/RemotePrViewParts.tsx");
+  assert.match(text, /<PrFilesTree\b[\s\S]*?onSelectPath=\{selectFile\}/);
+  assert.deepEqual(
+    auditChild(text, {
+      prop: "onSelectPath",
+      calls: [
+        /^\s*onSelectPath\(path\);$/,
+        // Import activation notes its epoch before asynchronous resolution.
+        /^\s*onSelectPath\(target\);$/,
+      ],
+    }),
+    [],
+  );
+  // The toolbar arrows forward user activations through the same picker.
+  assert.deepEqual(
+    auditChild(text, {
+      prop: "selectFile",
+      calls: [/^\s*selectFile\(path\);$/],
+    }),
+    [],
+  );
+});
+
+test("MR import activation claims the navigation epoch before snapshot reads", () => {
+  const text = read("src/features/pulls/usePrImportNavigation.ts");
+  assert.match(
+    text,
+    /noteUserInteraction\(\);\s*const epoch = useUiStore\.getState\(\)\.interactionEpoch;[\s\S]*?await queryClient\.fetchQuery/,
+  );
+  assert.match(text, /useUiStore\.getState\(\)\.interactionEpoch === epoch/);
+});
 
 test("mutation control: a reverted file row click fails the pin", () => {
   const file = "src/features/pulls/PrCommitDetail.tsx";
@@ -264,11 +301,11 @@ test("mutation control: a file helper that skips the note fails the pin", () => 
 });
 
 test("mutation control: an automatic call through a child's pick prop fails the pin", () => {
-  const file = "src/features/pulls/RemotePrViewParts.tsx";
+  const file = "src/features/pulls/PrFilesTree.tsx";
   const source = read(file).replace(/\r\n/g, "\n");
   const auto = source.replace(
-    "    onActivate: (file) => onSelectPath(file.path),",
-    "    onActivate: (file) => onSelectPath(file.path),\n    onFocus: () => onSelectPath(files[0].path),",
+    "  const onListKeyDown = listKeyboardNav({",
+    "  if (files[0]) onSelectPath(files[0].path);\n  const onListKeyDown = listKeyboardNav({",
   );
   assert.notEqual(auto, source, "mutation target not found");
   assert.notDeepEqual(auditChild(auto, PICK_PROP_CHILDREN[file]), []);

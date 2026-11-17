@@ -58,6 +58,7 @@ export function DetailRail({
   ariaLabel,
   className,
   header,
+  headerClassName,
   role,
   children,
 }: {
@@ -66,6 +67,7 @@ export function DetailRail({
   /** Rendered start-aligned in the expanded caret strip (e.g. a file count),
    *  which owns the row's height — it must not grow past one short line. */
   header?: ReactNode;
+  headerClassName?: string;
   role?: AriaRole;
   children: ReactNode;
 }) {
@@ -197,7 +199,11 @@ export function DetailRail({
       <div className="flex h-7 shrink-0 items-center justify-end gap-2 border-b px-0.5">
         {/* `pl-2.5` on top of the row's `px-0.5` puts the header's text column on
             the same 12px inset as the `px-3` rows below it. */}
-        {header ? <div className="mr-auto min-w-0 pl-2.5">{header}</div> : null}
+        {header ? (
+          <div className={cn("mr-auto min-w-0 pl-2.5", headerClassName)}>
+            {header}
+          </div>
+        ) : null}
         <Button
           ref={toggleRef}
           type="button"

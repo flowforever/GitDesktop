@@ -1,0 +1,1 @@
+- Click JavaScript and TypeScript import paths in request diffs, complete file comparisons and source previews to open the target at the request's head commit and reveal it in the file tree. Relative paths, configured aliases and workspace package entry points are supported; unchanged targets open in All files.

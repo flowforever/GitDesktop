@@ -89,6 +89,12 @@ expand them when you want the detail.
 
 ### Repositories
 
+The **Repositories** tab keeps the searchable repository list on the left and
+Open, Clone, Create and other actions in a panel at the top right. The list fills
+the remaining window height and scrolls internally. Opening a repository creates
+its own application tab; reopening the same checkout selects the existing tab.
+Help and Settings sit beside the action panel's heading.
+
 Clone, add local, create (with README / .gitignore / license scaffolding),
 publish to GitHub, GitLab, or Bitbucket, and fork.
 
@@ -437,6 +443,25 @@ PRs**: the same workflow against any two branches with no remote at all,
 promotable to a real GitHub, GitLab, or Bitbucket PR (comments and all)
 in one click.
 
+- **Compact review layout**: request details start collapsed. MR tabs show their
+  title and state in the window title bar, with section tabs beside the actions.
+  Expand the header for metadata and
+  checks. Stack members have a separate Show/Hide control; opening a GitLab
+  member selects its own MR tab. The Files sidebar groups changes into folders,
+  keeps complete file names and scrolls horizontally for long names. MR tabs
+  show request actions beside Checkout, Edit and the forge link. Toolbar arrows
+  reveal changed files in the tree and navigate individual change blocks.
+- **File context while reviewing**: toggle **All files** in the Files sidebar
+  to browse the complete tree at the request's head commit. Unchanged files have
+  a separate marker and open as read-only source; changed files keep their diff.
+  Scope switches start with folders collapsed, marking directories that contain
+  changes and their parents. For GitLab MRs, **Diff / Full file** switches a changed
+  file between its patch and complete before-and-after comparison. The view fetches
+  missing commit objects without switching your branch.
+- **Follow imports while reviewing**: click a JavaScript or TypeScript import
+  path in a diff or source preview to open its file at the request's head and
+  reveal it in the tree. Relative imports, configured path aliases and workspace
+  packages resolve from that snapshot; unchanged targets open in **All files**.
 - **Open, edit, merge**: review, comment, approve, edit, and merge (merge &
   squash on all three; rebase on GitHub, fast-forward on Bitbucket) without
   the browser. Labels and assignees on GitHub & GitLab (set them when you
@@ -1015,7 +1040,8 @@ MR rows open complete details in separate, closable application tabs. Opening
 an MR again selects its existing tab. GitDesktop uses a verified local checkout
 or worktree; if none is available, choose a checkout or clone the project first.
 Comments and review drafts remain associated with their MR as you switch tabs.
-The pinned My works tab keeps your place in the list.
+The pinned **My works** tab keeps your place in the list. The adjacent pinned
+**Repositories** tab opens the repository chooser without closing your MR tabs.
 
 Filter loaded items by title, project or number. Arrow keys navigate the MR list,
 and Enter opens the selection. Refresh reloads the selected category. Results
@@ -1023,7 +1049,7 @@ are bounded; a note appears when items may be missing. Mentioned Me reflects the
 mention history GitLab retains. Team labels persist across restarts; open MR tabs
 last for the current session.
 
-Use **Repositories** for the repository list and the open, clone and create
+Use the **Repositories** tab for the repository list and the open, clone and create
 commands. Returning from a repository opens My works. GitHub and Bitbucket remain
 available in the repository views. The command palette and `Ctrl`/`⌘`+`Shift`+`M`
 also open My works.

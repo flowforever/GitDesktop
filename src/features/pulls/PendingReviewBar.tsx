@@ -90,8 +90,12 @@ export function DraftCommentCard({
     }
   }
 
+  // Diff rebuilds must wait for the editor's unsaved local text.
   return (
-    <div className="space-y-1.5 rounded border bg-background px-3 py-2 text-xs">
+    <div
+      data-diff-line-widget={editing ? "layout" : undefined}
+      className="space-y-1.5 rounded border bg-background px-3 py-2 text-xs"
+    >
       <div className="flex items-center gap-2">
         <Badge variant="secondary" className="shrink-0 text-warning">
           Pending

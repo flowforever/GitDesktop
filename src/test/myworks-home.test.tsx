@@ -13,6 +13,8 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MyWorkScreen } from "@/features/mywork/MyWorkScreen";
+import { WorkDocumentBar } from "@/features/mywork/WorkDocumentBar";
+import { TabPanel } from "@/features/repository/TabPanel";
 import { CloneRepoDialog } from "@/features/welcome/CloneRepoDialog";
 import { useInvalidateAfterReconnect } from "@/lib/git/queries/accounts";
 import { useGitLabWorkAccounts } from "@/lib/git/queries/gitlab-work";
@@ -98,7 +100,57 @@ function show() {
   );
 }
 
+function WorkTabsHost() {
+  const active = useUiStore((state) => state.view === "mywork");
+  return (
+    <>
+      <WorkDocumentBar />
+      <TabPanel active={active}>
+        <MyWorkScreen active={active} />
+      </TabPanel>
+    </>
+  );
+}
+
 describe("GitLab work home", () => {
+  it("keeps the work category and filter when the Repositories tab is opened", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <WorkTabsHost />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Team Merge Requests" }));
+    await screen.findByText(
+      "Configure your team labels to find matching merge requests.",
+    );
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Filter your work" }),
+      {
+        target: { value: "review this" },
+      },
+    );
+    expect(screen.queryByRole("button", { name: "Repositories" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Repositories" }));
+
+    expect(useUiStore.getState().view).toBe("welcome");
+    expect(
+      screen.queryByRole("combobox", { name: "Filter your work" }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "My works" }));
+
+    expect(
+      screen.getByRole("tab", { name: "Team Merge Requests" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByRole("combobox", { name: "Filter your work" }),
+    ).toHaveValue("review this");
+  });
+
   it("clears fresh home pages when reconnecting without any repository status query", async () => {
     const client = new QueryClient();
     client.setQueryData(["gitlab-work", "mine", []], {

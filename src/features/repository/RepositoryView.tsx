@@ -691,13 +691,14 @@ export function RepositoryView({
   // flashing through the bare base title (the cleanup used to run on every
   // dep change, racing the async setTitle).
   useEffect(() => {
+    if (detailOnly) return;
     const display = alias ?? repoName;
     if (!display) return;
     const title = headLabel ? `${display} • ${headLabel}` : display;
     getCurrentWindow()
       .setTitle(`${title} — ${APP_TITLE}`)
       .catch(() => undefined);
-  }, [repoName, alias, headLabel]);
+  }, [repoName, alias, headLabel, detailOnly]);
   useLayoutEffect(() => {
     if (refocusToggleRef.current === null) return;
     const matched = refocusToggleRef.current === sidebarCollapsed;
@@ -775,7 +776,7 @@ export function RepositoryView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <RepoHeader repoPath={repoPath} />
+      {!detailOnly && <RepoHeader repoPath={repoPath} />}
       <OpRecoveryBanner repoPath={repoPath} />
       <WorktreeRemovalBanner repoPath={repoPath} />
       <PublishPendingBanner repoPath={repoPath} />
@@ -1030,6 +1031,7 @@ export function RepositoryView({
               <RemotePrView
                 repoPath={repoPath}
                 number={Number(deferredPr.id)}
+                windowTitleSuffix={detailOnly ? APP_TITLE : undefined}
               />
             ) : deferredPr?.kind === "local" ? (
               <LocalPrView repoPath={repoPath} id={deferredPr.id} />

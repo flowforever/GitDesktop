@@ -142,6 +142,7 @@ describe("the PR stack section", () => {
         onSelect={onSelect}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Show stack members" }));
   }
 
   it("reports a clicked member as followed", () => {

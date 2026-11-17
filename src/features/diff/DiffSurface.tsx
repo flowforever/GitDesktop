@@ -252,6 +252,12 @@ export interface DiffContentRevs {
   newRev?: string | null;
 }
 
+/** Exact, caller-verified text paired with its bounded complete-context patch. */
+interface FullContextContent {
+  old: string | null;
+  new: string | null;
+}
+
 /** `\n`-split segments in a string, allocation-free. A final newline's empty
  *  segment counts too: the coverage check is unaffected (it compares against
  *  the last real line) and the read-back budget errs one line tight.
@@ -333,6 +339,8 @@ export function GitDiffView({
   filePath,
   oldPath,
   text,
+  fullContext = false,
+  fullContextContent,
   repoPath,
   contentRevs,
   lineAnchors,
@@ -347,6 +355,10 @@ export function GitDiffView({
    *  Omitted = `filePath`, for hosts with no old side to read. */
   oldPath?: string;
   text: string;
+  /** Caller-verified, bounded complete context: skip only the row preview cap.
+   *  Generated-line and shortening guards remain active. */
+  fullContext?: boolean;
+  fullContextContent?: FullContextContent;
   /** The diff's own repo, for reading full file text (highlight context). */
   repoPath?: string;
   contentRevs?: DiffContentRevs;
@@ -381,6 +393,8 @@ export function GitDiffView({
           filePath={filePath}
           oldPath={oldPath}
           text={text}
+          fullContext={fullContext}
+          fullContextContent={fullContextContent}
           repoPath={repoPath}
           contentRevs={contentRevs}
           lineAnchors={lineAnchors}
@@ -1127,6 +1141,8 @@ function RenderedDiff({
   filePath,
   oldPath,
   text,
+  fullContext = false,
+  fullContextContent,
   repoPath,
   contentRevs,
   lineAnchors,
@@ -1139,6 +1155,8 @@ function RenderedDiff({
   filePath: string;
   oldPath?: string;
   text: string;
+  fullContext?: boolean;
+  fullContextContent?: FullContextContent;
   repoPath?: string;
   contentRevs?: DiffContentRevs;
   lineAnchors?: DiffLineAnchor[];
@@ -1176,6 +1194,9 @@ function RenderedDiff({
   const deferredText = useDeferredValue(text);
   const deferredPath = useDeferredValue(filePath);
   const deferredOldPath = useDeferredValue(oldPath ?? filePath);
+  const deferredFullContent = useDeferredValue(
+    fullContext ? fullContextContent : undefined,
+  );
 
   // Reset on the DEFERRED path, not the urgent `filePath`: `blocked` derives
   // from `deferredText`, so an urgent reset would re-block the OUTGOING mega
@@ -1203,9 +1224,9 @@ function RenderedDiff({
   // diff is built ONCE in its final layout rather than rebuilt (the "flash"),
   // and keep the previous build up through a refresh's `contentHold`.
   const {
-    content,
-    pending: contentPending,
-    hold: contentHold,
+    content: readContent,
+    pending: readContentPending,
+    hold: readContentHold,
   } = useFileContent(
     repoPath,
     deferredPath,
@@ -1215,8 +1236,25 @@ function RenderedDiff({
     // whole-file reads content mode maps syntax onto, and the two whole-file
     // IPC reads are pure waste when we're going to hunk-only anyway — skip
     // content mode entirely once any line is over the shorten cap.
-    longestLine > DIFF_MAX_LINE_CHARS ? undefined : contentRevs,
+    deferredFullContent !== undefined || longestLine > DIFF_MAX_LINE_CHARS
+      ? undefined
+      : contentRevs,
   );
+  // Identical hunks need both file models. Normalize absent display text while
+  // preserving snapshot metadata; stable identity avoids rebuilding on row reports.
+  const content = useMemo(
+    () =>
+      deferredFullContent === undefined
+        ? readContent
+        : {
+            old: deferredFullContent.old ?? "",
+            new: deferredFullContent.new ?? "",
+          },
+    [deferredFullContent, readContent],
+  );
+  const contentPending =
+    deferredFullContent === undefined && readContentPending;
+  const contentHold = deferredFullContent === undefined && readContentHold;
 
   const { shown, hidden, shortened } = useMemo(() => {
     // On a blocked mega file we show a placeholder, not a diff — do no cap or
@@ -1224,11 +1262,12 @@ function RenderedDiff({
     if (blocked) return { shown: "", hidden: 0, shortened: 0 };
     // Content mode renders the full diff (the renderer collapses non-hunk
     // context into expandable gaps), so the cap doesn't apply there.
-    const capped = content
-      ? { text: deferredText, hidden: 0 }
-      : showFull
+    const capped =
+      content || fullContext
         ? { text: deferredText, hidden: 0 }
-        : capDiffText(deferredText, DIFF_LINE_CAP);
+        : showFull
+          ? { text: deferredText, hidden: 0 }
+          : capDiffText(deferredText, DIFF_LINE_CAP);
     // Hard-shorten over-long lines UNCONDITIONALLY on whatever renders: "Show
     // full diff" reveals hidden lines but long lines stay shortened (safety
     // invariant — no rendered diff may freeze). `longestLine` is measured on the
@@ -1243,7 +1282,7 @@ function RenderedDiff({
       hidden: capped.hidden,
       shortened: short.shortened,
     };
-  }, [deferredText, showFull, content, blocked, longestLine]);
+  }, [deferredText, showFull, fullContext, content, blocked, longestLine]);
 
   // Syntax prefs follow the active repo (repo-scoped custom languages); the
   // active repo owns every surface that supplies content, so this matches.
@@ -2122,6 +2161,8 @@ export function DiffContent({
   stagingSide,
   anchorCommit,
   whitespaceControl = false,
+  fullContext = false,
+  fullContextContent,
 }: {
   filePath: string;
   /** Absent only when the source query has nothing to show; never an empty
@@ -2167,6 +2208,12 @@ export function DiffContent({
    *  whitespace palette action. Only {@link DiffSurface} sets it, so the
    *  remote PR hosts get neither. */
   whitespaceControl?: boolean;
+  /** Complete context already verified and bounded by the caller. Shows every
+   *  row immediately, preserving the renderer's long-line safety guards. */
+  fullContext?: boolean;
+  /** Already-read exact versions for a verified full-context patch. Used only
+   *  with fullContext and never for truncated or retained placeholder data. */
+  fullContextContent?: FullContextContent;
 }) {
   // The pane measures itself: this surface mounts at widths from a full window
   // down to a rail-flanked column, and both the split gate and the toolbar's
@@ -2724,6 +2771,14 @@ export function DiffContent({
               filePath={filePath}
               oldPath={oldSidePath}
               text={data.text}
+              fullContext={
+                fullContext && !data.isTruncated && !dataIsPlaceholder
+              }
+              fullContextContent={
+                fullContext && !data.isTruncated && !dataIsPlaceholder
+                  ? fullContextContent
+                  : undefined
+              }
               repoPath={repoPath}
               // A truncated diff was cut by the byte cap and can't line up
               // with the full file text, and a placeholder one belongs to the

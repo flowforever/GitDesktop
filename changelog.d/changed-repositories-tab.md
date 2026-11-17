@@ -1,0 +1,1 @@
+- Repositories is a permanent tab beside My works. Its searchable list fills the left side, with launch actions, help and settings in a compact panel at the top right. Opening a repository creates or selects its own tab while other repository and MR tabs stay open.

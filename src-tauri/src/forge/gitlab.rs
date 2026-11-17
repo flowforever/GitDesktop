@@ -2581,6 +2581,17 @@ async fn project_label_colors(repo_path: &str, enc: &str) -> HashMap<String, Str
     .unwrap_or_default()
 }
 
+/// One fresh changes body keeps the comparison's refs and file metadata coherent.
+pub(crate) async fn mr_snapshot_comparison_metadata(
+    repo_path: &str,
+    number: u64,
+) -> AppResult<String> {
+    let path = project_path(repo_path).await?;
+    let endpoint = format!("projects/{}/merge_requests/{number}/changes", encode_project(&path));
+    let out = run_glab(Some(repo_path), &["api", &endpoint], GLAB_NETWORK_TIMEOUT).await?;
+    Ok(out.stdout_lossy())
+}
+
 /// Full read view of one merge request — core fields + files, commits, comments, and
 /// the head pipeline's CI checks, mapped onto `PrDetails`. Reviews stay empty (a
 /// GitLab approval carries no reviewable body — approvals surface via the timeline

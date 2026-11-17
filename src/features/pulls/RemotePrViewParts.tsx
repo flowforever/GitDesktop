@@ -1,10 +1,17 @@
-import { ClockIcon } from "@phosphor-icons/react";
-import { type ComponentProps, useMemo, useState } from "react";
-import { DetailRail, DetailRailRow } from "@/components/detail-rail";
-import { DiffStat } from "@/components/diff-stat";
+import { ClockIcon, FilesIcon } from "@phosphor-icons/react";
+import {
+  type ComponentProps,
+  lazy,
+  Suspense,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { DetailRailRow } from "@/components/detail-rail";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
-import { PathText } from "@/components/path-text";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -19,8 +26,17 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  DegradedListNotice,
+  useRetryFocusRescue,
+} from "@/features/conversations/ConversationListPanel";
+import {
+  detailNoticeMessage,
+  offlinePendingMessage,
+  refreshFailed,
+  resolveDetailPane,
+} from "@/features/conversations/remote-section-state";
 import type { MentionSource } from "@/features/conversations/useMentionCandidates";
 import { DiffPlaceholder } from "@/features/diff/DiffPlaceholder";
 import {
@@ -28,6 +44,7 @@ import {
   type DiffLineAnchor,
   type LineWidget,
 } from "@/features/diff/DiffSurfaceLazy";
+import { useReportPaneSettled } from "@/features/diff/diff-pane-hold";
 import {
   FileSlots,
   keyedPaneView,
@@ -38,9 +55,14 @@ import {
   useSlotRetained,
   useSlotWidget,
 } from "@/features/diff/file-slot";
-import { FileRowActions } from "@/features/history/FileRowActions";
+import {
+  LAYOUT_COMPOSER_HELD,
+  lineComposerOpen,
+} from "@/features/diff/whitespace-mode";
 import { TimeTrackingControls } from "@/features/issues/RemoteIssueViewParts";
-import { sectionIsBinary } from "@/lib/git/diff-split";
+import { presentError } from "@/lib/error-summary";
+import { sectionIsBinary, sectionOldFilePath } from "@/lib/git/diff-split";
+import { FULL_OID_RE } from "@/lib/git/oid";
 import {
   type PendingThreadWrites,
   useAddMrSpentTime,
@@ -48,19 +70,71 @@ import {
   useObjectsPresent,
   useSetMrTimeEstimate,
 } from "@/lib/git/queries";
+import { usePrSnapshotFiles } from "@/lib/git/queries/pr-snapshot";
 import type {
   ForgeProvider,
   RemoteLens,
   ReviewThreadOut,
 } from "@/lib/git/types";
-import { listKeyboardNav } from "@/lib/list-keyboard-nav";
+import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { ACT_PENDING_REASON } from "@/lib/offline-writes";
 import type { ReviewDraft } from "@/lib/pulls/review-drafts";
+import { useUiStore } from "@/lib/stores/ui";
 import { cn } from "@/lib/utils";
 import { DraftCommentCard } from "./PendingReviewBar";
+import { PrChangedFilesNav } from "./PrChangedFilesNav";
+import { PrChangesNav } from "./PrChangesNav";
+import { PrCodeImportLinks } from "./PrCodeImportLinks";
+import { PrFilesTree, type PrTreeFile } from "./PrFilesTree";
+import { PrFullFileLoading } from "./PrFullFileLoading";
 import { ReviewThreadCard, type SuggestionApply } from "./ReviewThreads";
+import { usePrImportNavigation } from "./usePrImportNavigation";
 
 type PrFile = { path: string; additions: number; deletions: number };
+const PrSourceFile = lazy(() =>
+  import("./PrSourceFile").then((module) => ({ default: module.PrSourceFile })),
+);
+const PrFullFileDiff = lazy(() =>
+  import("./PrFullFileDiff").then((module) => ({
+    default: module.PrFullFileDiff,
+  })),
+);
+
+type PrFileView =
+  | { kind: "diff"; path: string }
+  | {
+      kind: "source";
+      path: string;
+      headSha: string;
+      lens: RemoteLens;
+      statusLabel: string;
+    }
+  | {
+      kind: "full";
+      path: string;
+      headSha: string;
+      lens: RemoteLens;
+      number: number;
+    };
+
+function subscribeLineComposer(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-diff-line-widget"],
+  });
+  return () => observer.disconnect();
+}
+
+const ignoreSlotRead = () => undefined;
+
+type PrImportWiring = {
+  onOpenImport?: ComponentProps<typeof PrCodeImportLinks>["onOpen"];
+  getImportSource?: ComponentProps<typeof PrCodeImportLinks>["getSource"];
+  importDisabled?: boolean;
+};
 
 /** The handlers/gates the in-diff {@link ReviewThreadCard}s need — a subset of
  *  the Conversation block's, passed straight through from the view. */
@@ -162,6 +236,8 @@ export function PrFilesPane({
   fileDiffLookup,
   mentions,
   blameRev,
+  changesIncomplete = false,
+  interactionEnabled = true,
 }: {
   files: PrFile[];
   /** Rows to show as binary (`binaryRowPaths`: 0/0 forge counts over a marker
@@ -192,7 +268,163 @@ export function PrFilesPane({
   lineWidget?: LineWidget;
   /** PR head sha — pins the file-row Blame at the PR's tip. Omit to hide Blame. */
   blameRev?: string;
+  /** An incomplete MR file list cannot classify other paths as unchanged. */
+  changesIncomplete?: boolean;
+  /** The parent is showing this request's settled, interactive details. */
+  interactionEnabled?: boolean;
 } & DiffThreadWiring) {
+  const diffEntity = `${lens ?? ""}#${number ?? ""}`;
+  const scopeKey = JSON.stringify([repoPath, diffEntity]);
+  const [treeReveal, setTreeReveal] = useState<{
+    key: string;
+    path: string;
+    id: number;
+  } | null>(null);
+  const [scope, setScope] = useState({
+    key: scopeKey,
+    allFiles: false,
+    sourcePath: null as { path: string; headSha: string } | null,
+  });
+  if (scope.key !== scopeKey) {
+    setScope({ key: scopeKey, allFiles: false, sourcePath: null });
+  }
+  const fileViewKey = JSON.stringify([
+    scopeKey,
+    blameRev,
+    provider,
+    effectivePath,
+    scope.sourcePath?.path ?? null,
+  ]);
+  const [fileView, setFileView] = useState({
+    key: fileViewKey,
+    full: false,
+  });
+  if (fileView.key !== fileViewKey)
+    setFileView({ key: fileViewKey, full: false });
+  const fullFile = fileView.key === fileViewKey && fileView.full;
+  const composerOpen = useSyncExternalStore(
+    subscribeLineComposer,
+    lineComposerOpen,
+  );
+  const snapshotReady =
+    !!repoPath &&
+    number !== undefined &&
+    number > 0 &&
+    !!blameRev &&
+    FULL_OID_RE.test(blameRev);
+  const snapshot = usePrSnapshotFiles(
+    repoPath ?? "",
+    number ?? 0,
+    blameRev,
+    lens ?? "origin",
+    (scope.allFiles || fullFile) && snapshotReady,
+  );
+  const changedPaths = useMemo(
+    () => new Set(files.map((file) => file.path)),
+    [files],
+  );
+  const sourcePaths = useMemo(
+    () =>
+      new Set(
+        snapshot.data
+          ?.filter((file) => !file.undecodable)
+          .map((file) => file.path),
+      ),
+    [snapshot.data],
+  );
+  const treeFiles = useMemo<PrTreeFile[]>(() => {
+    if (!scope.allFiles || !snapshot.data) return files;
+    return [
+      ...files,
+      ...snapshot.data
+        .filter((file) => file.undecodable || !changedPaths.has(file.path))
+        .map((file, index) => ({
+          path: file.path,
+          sourceOnly: true as const,
+          undecodable: file.undecodable,
+          entryId: file.undecodable ? String(index) : undefined,
+        })),
+    ];
+  }, [files, scope.allFiles, snapshot.data, changedPaths]);
+  const sourcePath =
+    scope.allFiles &&
+    scope.sourcePath !== null &&
+    scope.sourcePath.headSha === blameRev &&
+    sourcePaths.has(scope.sourcePath.path) &&
+    !changedPaths.has(scope.sourcePath.path)
+      ? scope.sourcePath
+      : null;
+  const shownPath = sourcePath?.path ?? effectivePath;
+  const showFileViewToggle =
+    shownPath !== null && sourcePath === null && changedPaths.has(shownPath);
+  const comparisonSupported =
+    provider === "gitlab" && (lens ?? "origin") === "origin";
+  const interactionReason = "Wait for the selected request to finish opening.";
+  const fullFileReason = !interactionEnabled
+    ? interactionReason
+    : !comparisonSupported
+      ? "Full file comparison is available for GitLab merge requests on origin."
+      : !snapshotReady
+        ? "Reload this request to read the file at its head commit."
+        : composerOpen
+          ? LAYOUT_COMPOSER_HELD
+          : undefined;
+  function toggleFileScope() {
+    if (!interactionEnabled || (!snapshotReady && !scope.allFiles)) return;
+    useUiStore.getState().noteUserInteraction();
+    setScope((previous) => ({
+      ...previous,
+      allFiles: !previous.allFiles,
+      sourcePath: null,
+    }));
+  }
+  function setFileMode(full: boolean) {
+    if (!interactionEnabled) return;
+    if (full && (!snapshotReady || !comparisonSupported || lineComposerOpen()))
+      return;
+    useUiStore.getState().noteUserInteraction();
+    setFileView({ key: fileViewKey, full });
+  }
+  useHotkeyAction(
+    "pr-toggle-all-files",
+    toggleFileScope,
+    interactionEnabled && (snapshotReady || scope.allFiles),
+  );
+  useHotkeyAction(
+    "pr-toggle-full-file",
+    () => setFileMode(!fullFile),
+    interactionEnabled &&
+      showFileViewToggle &&
+      (fullFile || fullFileReason === undefined),
+  );
+  const sourceLabel = changesIncomplete ? "Not in loaded changes" : "Unchanged";
+  const selectFile = (path: string) => {
+    if (
+      scope.allFiles &&
+      blameRev &&
+      sourcePaths.has(path) &&
+      !changedPaths.has(path)
+    ) {
+      useUiStore.getState().noteUserInteraction();
+      setScope((previous) => ({
+        ...previous,
+        sourcePath: { path, headSha: blameRev },
+      }));
+    } else {
+      setScope((previous) => ({ ...previous, sourcePath: null }));
+      onSelectPath(path);
+    }
+  };
+  function selectChangedFile(path: string) {
+    if (!interactionEnabled || lineComposerOpen()) return;
+    selectFile(path);
+    setTreeReveal((previous) => ({
+      key: scopeKey,
+      path,
+      id: (previous?.id ?? 0) + 1,
+    }));
+  }
+  const changesLabel = provider === "gitlab" ? "MR changes" : "PR changes";
   // Markdown preview reads the file at the PR head, so it's offered only once
   // that commit is a local object (after a Check out PR or a fetch).
   const headPresent = useObjectsPresent(
@@ -201,111 +433,415 @@ export function PrFilesPane({
   );
   const previewRev =
     repoPath && blameRev && headPresent.data === true ? blameRev : undefined;
-  // Arrow keys walk the file list, mirroring the app's other diff lists.
-  const onFilesKeyDown = listKeyboardNav({
-    items: files,
-    activeIndex: files.findIndex((f) => f.path === effectivePath),
-    onActivate: (file) => onSelectPath(file.path),
-    rowKey: (file) => file.path,
-    rowAttr: "data-path",
-  });
-
   // The file's diff swaps through the pane's two-slot hold, within this pull
   // request; another one re-targets the shown slot in place.
-  const diffEntity = `${lens ?? ""}#${number ?? ""}`;
-  const diffTarget = effectivePath
-    ? keyedPaneView(repoPath ?? "", diffEntity, effectivePath, effectivePath)
+  const view: PrFileView | null = shownPath
+    ? sourcePath
+      ? {
+          kind: "source",
+          path: sourcePath.path,
+          headSha: sourcePath.headSha,
+          lens: lens ?? "origin",
+          statusLabel: changesIncomplete
+            ? "Not in loaded changes"
+            : "No MR changes",
+        }
+      : fullFile && snapshotReady && blameRev && number !== undefined
+        ? {
+            kind: "full",
+            path: shownPath,
+            headSha: blameRev,
+            lens: lens ?? "origin",
+            number,
+          }
+        : { kind: "diff", path: shownPath }
+    : null;
+  const diffTarget = view
+    ? keyedPaneView(repoPath ?? "", diffEntity, JSON.stringify(view), view)
     : placeholderPaneView(diffEntity);
   const diffSlots = useFileSlots(diffTarget);
-
-  const fileRows = files.map((file) => (
-    <button
-      type="button"
-      key={file.path}
-      data-path={file.path}
-      aria-current={effectivePath === file.path || undefined}
-      className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
-        effectivePath === file.path
-          ? "bg-accent text-accent-foreground"
-          : "hover:bg-muted/60",
-      )}
-      onClick={() => onSelectPath(file.path)}
-    >
-      <PathText path={file.path} className="flex-1 font-mono" />
-      {/* Plain DiffStat, not DiffStatSlot: the binary flag arrives after the diff
-          loads, but the forge counts ship with the row, so the cell never starts
-          empty — and the sibling detail rails all render the plain form. */}
-      <DiffStat
-        added={file.additions}
-        deleted={file.deletions}
-        isBinary={binaryPaths?.has(file.path) ?? false}
-      />
-    </button>
-  ));
+  const contentRef = useRef<HTMLDivElement>(null);
+  const importDisabled =
+    !interactionEnabled ||
+    !snapshotReady ||
+    diffSlots.holding ||
+    diffSlots.read.loading ||
+    diffSlots.read.placeholder;
+  const importLinks = usePrImportNavigation({
+    repoPath: repoPath ?? "",
+    number: number ?? 0,
+    lens: lens ?? "origin",
+    headSha: blameRev ?? "",
+    path: shownPath,
+    enabled: !importDisabled,
+    comparisonSupported,
+    onNavigate: (target) => {
+      if (changedPaths.has(target)) {
+        setScope((previous) => ({ ...previous, sourcePath: null }));
+        onSelectPath(target);
+      } else if (blameRev) {
+        setScope((previous) => ({
+          ...previous,
+          allFiles: true,
+          sourcePath: { path: target, headSha: blameRev },
+        }));
+      }
+      setTreeReveal((previous) => ({
+        key: scopeKey,
+        path: target,
+        id: (previous?.id ?? 0) + 1,
+      }));
+    },
+  });
 
   return (
     <DetailRailRow>
-      <DetailRail ariaLabel="Changed files">
-        {/* overflow-hidden contains the list's natural height (vendored Root is
-            `relative`-only) so a long file list can't leak a window scrollbar. */}
-        <ScrollArea className="min-h-0 flex-1 overflow-hidden">
-          {repoPath !== undefined ? (
-            <FileRowActions
-              repoPath={repoPath}
-              blameRev={blameRev}
-              onKeyDown={onFilesKeyDown}
+      <PrFilesTree
+        key={`${repoPath ?? ""}:${lens ?? ""}:${number ?? ""}`}
+        files={treeFiles}
+        binaryPaths={binaryPaths}
+        effectivePath={shownPath}
+        revealRequest={treeReveal?.key === scopeKey ? treeReveal : undefined}
+        onSelectPath={selectFile}
+        repoPath={repoPath}
+        blameRev={blameRev}
+        allFiles={scope.allFiles}
+        sourceLabel={sourceLabel}
+        header={
+          <div className="flex min-w-0 flex-1 items-center gap-0.5">
+            <DisabledReasonButton
+              variant={scope.allFiles ? "secondary" : "ghost"}
+              size="icon-xs"
+              aria-label={`File scope: ${scope.allFiles ? "All files" : changesLabel}`}
+              aria-pressed={scope.allFiles}
+              title={`${scope.allFiles ? "All files" : changesLabel} · ${scope.allFiles ? `Show ${changesLabel}` : "Show all files"}`}
+              disabled={
+                !interactionEnabled || (!snapshotReady && !scope.allFiles)
+              }
+              reason={
+                !interactionEnabled
+                  ? interactionReason
+                  : !snapshotReady
+                    ? "Reload this request to read its complete commit version."
+                    : undefined
+              }
+              onClick={toggleFileScope}
             >
-              {fileRows}
-            </FileRowActions>
-          ) : (
-            <div onKeyDown={onFilesKeyDown}>{fileRows}</div>
-          )}
-        </ScrollArea>
-      </DetailRail>
-      <main className="min-w-0 flex-1">
-        <FileSlots
-          slots={diffSlots}
-          target={diffTarget}
-          busy={diffSlots.holding || diffSlots.read.loading}
-        >
-          {(view) =>
-            view.kind === "file" ? (
-              <PrFileDiffSlot
-                path={view.file}
-                entity={view.entity}
-                fileDiff={fileDiff}
-                isPending={isPending}
-                isError={isError}
-                isPaused={isPaused}
-                isFetching={isFetching}
-                onRetry={onRetry}
-                dataIsPlaceholder={dataIsPlaceholder}
-                threads={threads}
-                drafts={drafts}
-                repoPath={repoPath}
-                lens={lens}
-                number={number}
-                previewRev={previewRev}
-                anchorCommit={blameRev ?? null}
-                lineWidget={lineWidget}
-                onQuote={onQuote}
-                onReply={onReply}
-                onResolve={onResolve}
-                pendingWrites={pendingWrites}
-                provider={provider}
-                apply={apply}
-                fileDiffLookup={fileDiffLookup}
-                mentions={mentions}
-                reportRead={diffSlots.reportRead}
+              <FilesIcon
+                aria-hidden
+                weight={scope.allFiles ? "fill" : "regular"}
               />
-            ) : (
-              <DiffPlaceholder message="Select a file to see its changes" />
-            )
-          }
-        </FileSlots>
+            </DisabledReasonButton>
+            <span className="ml-auto inline-flex">
+              <PrChangedFilesNav
+                files={files}
+                treeFiles={treeFiles}
+                currentPath={shownPath}
+                onSelectPath={selectChangedFile}
+                disabled={!interactionEnabled || composerOpen}
+              />
+            </span>
+          </div>
+        }
+        notice={
+          scope.allFiles && snapshot.data === undefined ? (
+            <div
+              role="status"
+              className="shrink-0 border-b px-3 py-2 text-xs text-muted-foreground"
+            >
+              {snapshot.isError ? (
+                <>
+                  <p>Couldn't load all files.</p>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    aria-label="Retry loading all files"
+                    onClick={() => void snapshot.refetch()}
+                  >
+                    Retry
+                  </Button>
+                </>
+              ) : snapshot.isPaused ? (
+                "All files will load when you're back online."
+              ) : (
+                <span className="flex items-center gap-1.5">
+                  <Spinner className="size-3" />
+                  Loading all files…
+                </span>
+              )}
+            </div>
+          ) : undefined
+        }
+      />
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {showFileViewToggle && (
+          <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-3 py-0.5">
+            {fullFile && (
+              <span
+                title="Before: MR base · After: MR head"
+                className="min-w-0 truncate text-xs text-muted-foreground"
+              >
+                Before: MR base · After: MR head
+              </span>
+            )}
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              <PrChangesNav
+                key={diffTarget.kind === "file" ? diffTarget.key : "empty"}
+                contentRef={contentRef}
+                disabled={
+                  !interactionEnabled ||
+                  diffSlots.holding ||
+                  diffSlots.read.loading ||
+                  diffSlots.read.placeholder
+                }
+              />
+              <ButtonGroup aria-label="File view">
+                <DisabledReasonButton
+                  variant={fullFile ? "ghost" : "secondary"}
+                  size="xs"
+                  aria-pressed={!fullFile}
+                  disabled={!interactionEnabled}
+                  reason={interactionReason}
+                  onClick={() => setFileMode(false)}
+                >
+                  Diff
+                </DisabledReasonButton>
+                <DisabledReasonButton
+                  variant={fullFile ? "secondary" : "ghost"}
+                  size="xs"
+                  aria-pressed={fullFile}
+                  disabled={fullFileReason !== undefined}
+                  reason={fullFileReason}
+                  onClick={() => setFileMode(true)}
+                >
+                  Full file
+                </DisabledReasonButton>
+              </ButtonGroup>
+            </div>
+          </div>
+        )}
+        <div ref={contentRef} className="min-h-0 flex-1">
+          <FileSlots
+            slots={diffSlots}
+            target={diffTarget}
+            busy={diffSlots.holding || diffSlots.read.loading}
+          >
+            {(view) =>
+              view.kind === "file" ? (
+                view.file.kind === "full" ? (
+                  <PrFullFileSlot
+                    repoPath={view.repo}
+                    view={view.file}
+                    reportRead={diffSlots.reportRead}
+                    onRetry={onRetry}
+                    onOpenImport={importLinks.onOpen}
+                    importDisabled={importDisabled}
+                  />
+                ) : view.file.kind === "source" ? (
+                  <Suspense
+                    fallback={<DiffPlaceholder message="Loading file…" />}
+                  >
+                    <PrSourceFile
+                      repoPath={view.repo}
+                      path={view.file.path}
+                      headSha={view.file.headSha}
+                      lens={view.file.lens}
+                      statusLabel={view.file.statusLabel}
+                      reportRead={diffSlots.reportRead}
+                      onOpenImport={importLinks.onOpen}
+                      importDisabled={importDisabled}
+                    />
+                  </Suspense>
+                ) : (
+                  <PrFileDiffSlot
+                    path={view.file.path}
+                    entity={view.entity}
+                    fileDiff={fileDiff}
+                    isPending={isPending}
+                    isError={isError}
+                    isPaused={isPaused}
+                    isFetching={isFetching}
+                    onRetry={onRetry}
+                    dataIsPlaceholder={dataIsPlaceholder}
+                    threads={threads}
+                    drafts={drafts}
+                    repoPath={repoPath}
+                    lens={lens}
+                    number={number}
+                    previewRev={previewRev}
+                    anchorCommit={blameRev ?? null}
+                    lineWidget={lineWidget}
+                    onQuote={onQuote}
+                    onReply={onReply}
+                    onResolve={onResolve}
+                    pendingWrites={pendingWrites}
+                    provider={provider}
+                    apply={apply}
+                    fileDiffLookup={fileDiffLookup}
+                    mentions={mentions}
+                    reportRead={diffSlots.reportRead}
+                    onOpenImport={importLinks.onOpen}
+                    getImportSource={importLinks.getSource}
+                    importDisabled={importDisabled}
+                  />
+                )
+              ) : (
+                <DiffPlaceholder message="Select a file to see its changes" />
+              )
+            }
+          </FileSlots>
+        </div>
       </main>
     </DetailRailRow>
+  );
+}
+
+function FullFileLoading({
+  path,
+  message = "Preparing the MR head…",
+}: {
+  path: string;
+  message?: string;
+}) {
+  useReportPaneSettled(false);
+  return <PrFullFileLoading filePath={path} message={message} />;
+}
+
+function FullFileReadGate({ settled }: { settled: boolean }) {
+  useReportPaneSettled(settled);
+  return null;
+}
+
+/** Each slot prepares its own captured head; a held source never follows the
+ *  newly selected file's repository, MR, or lens. */
+function PrFullFileSlot({
+  repoPath,
+  view,
+  reportRead,
+  onRetry,
+  onOpenImport,
+  importDisabled,
+}: {
+  repoPath: string;
+  view: Extract<PrFileView, { kind: "full" }>;
+  reportRead: (read: SlotRead) => void;
+  onRetry?: () => void;
+} & PrImportWiring) {
+  const snapshot = usePrSnapshotFiles(
+    repoPath,
+    view.number,
+    view.headSha,
+    view.lens,
+    true,
+  );
+  const sourceReady =
+    !snapshot.isPlaceholderData && Array.isArray(snapshot.data);
+  // The comparison child owns busy state once its paired read mounts.
+  useSlotRead(sourceReady ? ignoreSlotRead : reportRead, {
+    isPlaceholderData: snapshot.isPlaceholderData,
+    isPending: snapshot.isPending,
+    isPaused: snapshot.isPaused,
+  });
+  const pane = resolveDetailPane({
+    pending: snapshot.isPending,
+    error: snapshot.isError,
+    hasData: snapshot.data !== undefined,
+    paused: snapshot.isPaused,
+    fetching: snapshot.isFetching,
+  });
+  const failed = refreshFailed(snapshot);
+  const { hostRef, retryRef } = useRetryFocusRescue(pane === "error");
+
+  let body;
+  if (pane === "offline") {
+    body = <DiffPlaceholder message={offlinePendingMessage("this file")} />;
+  } else if (pane === "skeleton") {
+    body = <FullFileLoading path={view.path} />;
+  } else if (pane === "error") {
+    body = (
+      <DiffPlaceholder
+        message="Could not prepare this MR head"
+        action={
+          <div className="flex max-w-md flex-col items-center gap-2 px-4 text-center text-xs">
+            <p>{presentError(snapshot.error).summary}</p>
+            <Button
+              ref={retryRef}
+              variant="outline"
+              size="sm"
+              aria-label="Retry loading full file"
+              onClick={() => {
+                onRetry?.();
+                void snapshot.refetch();
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        }
+      />
+    );
+  } else if (!sourceReady) {
+    body = (
+      <DiffPlaceholder message="Could not verify the MR head. Reload this request or use Diff." />
+    );
+  } else {
+    body = (
+      <Suspense
+        fallback={
+          <FullFileLoading
+            path={view.path}
+            message="Loading full comparison…"
+          />
+        }
+      >
+        <PrFullFileDiff
+          repoPath={repoPath}
+          number={view.number}
+          headSha={view.headSha}
+          path={view.path}
+          lens={view.lens}
+          reportRead={reportRead}
+          onRetry={onRetry}
+          onOpenImport={onOpenImport}
+          importDisabled={importDisabled}
+        />
+      </Suspense>
+    );
+  }
+  return (
+    <div
+      ref={hostRef}
+      tabIndex={-1}
+      className="flex h-full min-h-0 flex-col outline-none"
+    >
+      {!sourceReady && (
+        <FullFileReadGate
+          settled={
+            (!snapshot.isPending || snapshot.isPaused) &&
+            !snapshot.isPlaceholderData
+          }
+        />
+      )}
+      <DegradedListNotice
+        noun="MR head"
+        degraded={pane === "content-degraded"}
+        message={detailNoticeMessage({
+          noun: "MR head",
+          isError: failed,
+          stale: snapshot.isPlaceholderData,
+        })}
+        onRetry={
+          failed
+            ? () => {
+                onRetry?.();
+                void snapshot.refetch();
+              }
+            : undefined
+        }
+        className="border-b px-3 py-1.5"
+      />
+      <div className="min-h-0 flex-1">{body}</div>
+    </div>
   );
 }
 
@@ -339,6 +875,9 @@ function PrFileDiffSlot({
   fileDiffLookup,
   mentions,
   reportRead,
+  onOpenImport,
+  getImportSource,
+  importDisabled,
 }: {
   path: string;
   /** The pull request (lens and number) this slot's view belongs to. */
@@ -362,7 +901,8 @@ function PrFileDiffSlot({
   /** The parent's composer, for its selected file: only a shown slot opens it. */
   lineWidget?: LineWidget;
   reportRead: (read: SlotRead) => void;
-} & DiffThreadWiring) {
+} & DiffThreadWiring &
+  PrImportWiring) {
   useSlotRead(reportRead, {
     isPlaceholderData: dataIsPlaceholder ?? false,
     isPending,
@@ -479,7 +1019,7 @@ function PrFileDiffSlot({
   ]);
 
   const widget = useSlotWidget(lineWidget);
-  return (
+  const content = (
     <DiffContent
       filePath={path}
       data={data}
@@ -495,6 +1035,21 @@ function PrFileDiffSlot({
       lineAnchors={lineAnchors}
       lineWidget={widget}
     />
+  );
+  return onOpenImport ? (
+    <PrCodeImportLinks
+      path={path}
+      oldPath={
+        data && !dataIsPlaceholder ? sectionOldFilePath(data.text) : undefined
+      }
+      onOpen={onOpenImport}
+      getSource={getImportSource}
+      disabled={importDisabled || dataIsPlaceholder}
+    >
+      {content}
+    </PrCodeImportLinks>
+  ) : (
+    content
   );
 }
 

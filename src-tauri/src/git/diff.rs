@@ -11,7 +11,7 @@ use crate::image_sniff::{dimensions_within_caps, has_raster_magic, sniff_image};
 use crate::state::AppState;
 
 /// Cap on file bytes shipped for image previews.
-const IMAGE_MAX_BYTES: usize = 20_000_000;
+pub(crate) const IMAGE_MAX_BYTES: usize = 20_000_000;
 
 #[cfg(test)]
 thread_local! {
@@ -45,7 +45,7 @@ pub(crate) fn is_repo_relative(path: &str) -> bool {
         .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
-enum PreviewRead {
+pub(crate) enum PreviewRead {
     Absent,
     TooLarge(u64),
     Bytes(Vec<u8>, Option<u64>),
@@ -254,7 +254,7 @@ pub async fn git_file_base64(
     finish_preview(read)
 }
 
-fn finish_preview(read: PreviewRead) -> AppResult<Option<FileBytes>> {
+pub(crate) fn finish_preview(read: PreviewRead) -> AppResult<Option<FileBytes>> {
     use base64::Engine;
     let (bytes, size) = match read {
         PreviewRead::Absent => return Ok(None),

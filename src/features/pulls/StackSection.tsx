@@ -1,12 +1,20 @@
-import { CheckIcon, CircleIcon, XIcon } from "@phosphor-icons/react";
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+  CheckIcon,
+  CircleIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import {
   type Ref,
   useEffect,
+  useId,
   useImperativeHandle,
   useRef,
   useState,
 } from "react";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { DegradedListNotice } from "@/features/conversations/ConversationListPanel";
 import { offlinePendingMessage } from "@/features/conversations/remote-section-state";
@@ -137,12 +145,12 @@ export function stackMergeDisclosure({
 }
 
 /**
- * The detail view's Stack section: the members of the open PR's stack, listed
- * bottom-first (merge order) with the one being read marked. Renders nothing
- * for an UNSTACKED PR; a known stack of fewer than two members gets the header
- * alone, and one whose member lookup failed gets the header and a notice. The
- * data rides the caller's PR-details query, so this has no loading state of its
- * own.
+ * The detail view's Stack section: a compact summary with an initially collapsed
+ * member list, bottom-first (merge order) with the one being read marked.
+ * Renders nothing for an UNSTACKED PR; a known stack of fewer than two members
+ * gets the header alone, and one whose member lookup failed gets the header and
+ * a notice. The data rides the caller's PR-details query, so this has no loading
+ * state of its own.
  */
 export function StackSection({
   stack,
@@ -184,6 +192,8 @@ export function StackSection({
   /** Why `disabled` holds Dissolve, as its tooltip and announced reason. */
   reason?: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const membersId = useId();
   if (!stack) return null;
   const rows = byPosition(members ?? []);
   // A KNOWN list this short has nothing to list, but the header stays: it
@@ -212,6 +222,15 @@ export function StackSection({
         dissolving={dissolving}
         disabled={disabled}
         reason={reason}
+        disclosure={
+          listShown
+            ? {
+                expanded,
+                controls: membersId,
+                toggle: () => setExpanded((open) => !open),
+              }
+            : undefined
+        }
       />
       {/* Members ride a second fetch that can fail while the stack summary
           succeeds — still say the PR is stacked, rather than hiding membership
@@ -232,6 +251,8 @@ export function StackSection({
         // Capped like the checks rollup so a deep stack can't push the tab row
         // out of the header; arrow-nav scrolls the active row into view.
         <div
+          id={membersId}
+          hidden={!expanded}
           className="mt-1.5 max-h-48 overflow-y-auto border"
           onKeyDown={onKeyDown}
         >
@@ -277,27 +298,53 @@ export function StackSection({
   );
 }
 
-/** The section's header line, plus the optional Dissolve action. The button is
- *  always visible (no hover-reveal) and its label carries the meaning — the
- *  destructive tone only arrives on hover/focus. */
+/** The summary, member disclosure, and optional Dissolve stay visible together.
+ *  Dissolve's destructive tone only arrives on hover/focus. */
 function StackHeader({
   label,
   onDissolve,
   dissolving,
   disabled,
   reason,
+  disclosure,
 }: {
   label: string;
   onDissolve?: () => void;
   dissolving?: boolean;
   disabled?: boolean;
   reason?: string;
+  disclosure?: {
+    expanded: boolean;
+    controls: string;
+    toggle: () => void;
+  };
 }) {
   return (
     <div className="flex items-center gap-2">
       <p className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
         {label}
       </p>
+      {disclosure && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="cursor-pointer text-muted-foreground"
+          aria-label={
+            disclosure.expanded ? "Hide stack members" : "Show stack members"
+          }
+          aria-expanded={disclosure.expanded}
+          aria-controls={disclosure.controls}
+          onClick={disclosure.toggle}
+        >
+          {disclosure.expanded ? (
+            <CaretDownIcon data-icon="inline-start" aria-hidden />
+          ) : (
+            <CaretRightIcon data-icon="inline-start" aria-hidden />
+          )}
+          {disclosure.expanded ? "Hide" : "Show"}
+        </Button>
+      )}
       {onDissolve && (
         <DisabledReasonButton
           variant="ghost"

@@ -2,6 +2,7 @@ import {
   ArrowCounterClockwiseIcon,
   ArrowSquareOutIcon,
   CaretDownIcon,
+  CaretRightIcon,
   ChatCircleIcon,
   CheckCircleIcon,
   ClockCountdownIcon,
@@ -16,6 +17,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Fragment,
@@ -24,6 +26,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -93,6 +96,7 @@ import type { LineWidget } from "@/features/diff/DiffSurface";
 import { AssigneesPopover } from "@/features/issues/IssueMetaPickers";
 import { JiraRefRow } from "@/features/issues/JiraRefRow";
 import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { TabPanel } from "@/features/repository/TabPanel";
 import {
   aiExcludePatterns,
   filterDiffByAiIgnore,
@@ -283,7 +287,6 @@ import { toastError, toastErrorWithNote } from "@/lib/toast";
 import { useEntityHold, useRevealGuard } from "@/lib/use-entity-hold";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { useRetained } from "@/lib/use-retained";
-import { useToastClearance } from "@/lib/use-toast-clearance";
 import { cn } from "@/lib/utils";
 import { ChecksRollup } from "./ChecksRollup";
 import { LinkedIssuesField } from "./LinkedIssuesField";
@@ -448,105 +451,90 @@ function cachedPrRow(
   return undefined;
 }
 
-/** A meta-grid value cell holding user chips: a `UserChip` is its 24px avatar,
- *  `py-0.5` and a 1px border, taller than the 24px cell an empty field draws.
- *  Bot-only cells (a Copilot reviewer chip) are 24px too, so they run short. */
-const USER_FIELD_CELL = "h-[30px]";
-
 /**
- * The view's loading arm, built from the loaded header's own rows so the answer
- * fills the frame instead of pushing it around, at every width:
- * - the title row: the cached row's title beside the real header buttons,
- *   disabled, so it wraps where the loaded one will;
- * - the meta row: state badge, author and branches, laid out the same way;
- * - the meta grid's label/value pairs in its container-query grid, the user
- *   fields at the height of a cell holding user chips;
- * - the real section tabs (disabled), the strip line for an open PR, and the
- *   composer and footer bar the loaded view docks under the feed.
- * With no cached row when the frame began for this selection (an arrival from
- * another tab) the title and meta row are skeletons of a typical width, and an
- * open PR is assumed. The checks rollup, a stack, the stack offer and board
- * field values vary per PR and stay unreserved, as do the diff totals the list
- * row doesn't carry.
+ * A loading frame matches the initially collapsed header: disclosure, state,
+ * title, actions and tabs. Metadata reserves no space until explicitly opened.
+ * A cached list row supplies the title and state; absent a row, an open PR is
+ * assumed for the controls and composer.
  */
 function PrLoadingFrame({
   noun,
   title,
   number,
   actions,
-  meta,
-  userFields,
+  state,
   tabs,
   strip,
   composer,
-  footer,
+  titleInWindow = false,
 }: {
   noun: string;
   title?: string;
   number: number;
   actions: ReactNode;
-  meta: ReactNode;
-  /** One entry per meta field in the loaded grid's order: whether its value cell
-   *  holds user chips. */
-  userFields: boolean[];
+  state: ReactNode;
   tabs: ReactNode;
   strip: boolean;
   composer: ReactNode;
-  footer: boolean;
+  titleInWindow?: boolean;
 }) {
   return (
     <>
       <span role="status" className="sr-only">
         {PR_SWITCH_LOADING_REASON}
       </span>
-      <header className="@container/pr-header space-y-2 border-b px-4 py-3">
+      <header className="@container/pr-header space-y-2 border-b px-4 py-2">
+        {titleInWindow && title !== undefined && (
+          <h2 className="sr-only">
+            {title} #{number}
+          </h2>
+        )}
         {/* A heading holding only the hidden skeleton is announced empty. */}
         <DetailTitleRow
-          headingAs={title === undefined ? "div" : "h2"}
+          headingAs={titleInWindow || title === undefined ? "div" : "h2"}
+          headingClassName={
+            titleInWindow ? "flex flex-wrap items-center gap-1" : undefined
+          }
           heading={
-            title === undefined ? (
-              <Skeleton
-                aria-hidden
-                className="inline-block h-4 w-80 max-w-full align-middle"
-              />
-            ) : (
-              <>
-                {title}{" "}
-                <span className="font-normal text-muted-foreground">
-                  #{number}
-                </span>
-              </>
-            )
+            <>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="mr-1 align-middle"
+                aria-expanded={false}
+                aria-label={`Show ${noun} details`}
+                disabled
+              >
+                <CaretRightIcon aria-hidden />
+              </Button>
+              {titleInWindow ? (
+                tabs
+              ) : (
+                <>
+                  {state}{" "}
+                  {title === undefined ? (
+                    <Skeleton
+                      aria-hidden
+                      className="inline-block h-4 w-80 max-w-full align-middle"
+                    />
+                  ) : (
+                    <>
+                      {title}{" "}
+                      <span className="font-normal text-muted-foreground">
+                        #{number}
+                      </span>
+                    </>
+                  )}
+                </>
+              )}
+            </>
           }
         >
           {actions}
         </DetailTitleRow>
-        <div
-          aria-hidden
-          className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
-        >
-          {meta}
-        </div>
-        {userFields.length > 0 ? (
-          <div
-            aria-hidden
-            className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 text-xs @3xl/pr-header:grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)]"
-          >
-            {/* Index key: a fixed static list that never reorders. */}
-            {userFields.map((users, i) => (
-              <Fragment key={i}>
-                <Skeleton className="h-6 w-20" />
-                <Skeleton
-                  className={cn(
-                    "w-28 max-w-full",
-                    users ? USER_FIELD_CELL : "h-6",
-                  )}
-                />
-              </Fragment>
-            ))}
-          </div>
-        ) : null}
-        <div className="flex flex-wrap gap-1 pt-1">{tabs}</div>
+        {!titleInWindow && (
+          <div className="flex flex-wrap gap-1 pt-1">{tabs}</div>
+        )}
       </header>
       {strip && (
         <div aria-hidden className="flex border-b px-3 py-1.5">
@@ -569,16 +557,6 @@ function PrLoadingFrame({
         />
       </div>
       {composer}
-      {footer && (
-        <div
-          aria-hidden
-          className="flex flex-wrap items-center gap-2 border-t p-3"
-        >
-          <span className="flex-1" />
-          <Skeleton className="h-7 w-16" />
-          <Skeleton className="h-7 w-20" />
-        </div>
-      )}
     </>
   );
 }
@@ -602,13 +580,9 @@ const TAB_NAME: Record<PrSection, string> = {
 export type FooterFocusTarget = "close" | "reopen";
 
 /**
- * Hands focus across the docked footer swap a close or reopen causes: the
- * outgoing footer unmounts with the focused button, dropping focus to <body>.
- * Armed by the action (only when focus was inside the outgoing footer) for the
- * PR it was fired on; it lands on the counterpart button when that footer
- * mounts, only while that PR is on screen and focus still sits on <body>.
- * Change-only, so a footer swapped by a refetch with nothing armed moves
- * nothing; a PR change drops the arm unconsumed.
+ * Hands focus from Close to Reopen (or back) when its action group unmounts.
+ * An action arms only for its shown PR while focus is in that group; the
+ * counterpart claims focus only if it still sits on <body> after the swap.
  */
 export function useFooterFocusSwap({
   entityKey,
@@ -618,9 +592,9 @@ export function useFooterFocusSwap({
   reopenRef,
 }: {
   entityKey: string;
-  /** The open footer (and its Close button) is painted. */
+  /** The open-request action group is painted. */
   closeShown: boolean;
-  /** The closed footer (and its Reopen button) is painted. */
+  /** The closed-request action group is painted. */
   reopenShown: boolean;
   closeRef: RefObject<HTMLButtonElement | null>;
   reopenRef: RefObject<HTMLButtonElement | null>;
@@ -654,7 +628,7 @@ export function useFooterFocusSwap({
       if (key !== liveKeyRef.current) return;
       pendingRef.current = { target, key };
     },
-    /** A failed write leaves the footer, and focus on its button, standing.
+    /** A failed write leaves the action group, and focus on its button, standing.
      *  Compare-and-clear on the key it armed with: a later PR's arm survives. */
     disarm(key: string) {
       if (pendingRef.current?.key === key) pendingRef.current = null;
@@ -735,10 +709,13 @@ function editRefsKey(parts: { refs: BodyRef[]; jiraRefs: string[] }): string {
 export function RemotePrView({
   repoPath,
   number,
+  windowTitleSuffix,
 }: {
   repoPath: string;
   number: number;
+  windowTitleSuffix?: string;
 }) {
+  const titleInWindow = windowTitleSuffix !== undefined;
   const queryClient = useQueryClient();
   // The read view is provider-neutral; GitHub-only mutations (full reviews,
   // ready-for-review) route through `gh_*` and gate on `canWrite`
@@ -827,6 +804,8 @@ export function RemotePrView({
   const [section, setSection] = useState<PrSection>(
     () => savedDocument()?.section ?? "conversation",
   );
+  const [headerExpanded, setHeaderExpanded] = useState(false);
+  const headerDetailsId = useId();
   // A section pick is a user action whose state lives here, so it claims the
   // epoch first and a pending continuation yields to it. The automatic
   // corrections below (the pending landing, the fallback) set it silently.
@@ -1372,10 +1351,10 @@ export function RemotePrView({
   );
   const abortResolvePending =
     pendingWriteOfKind(pendingWrites, "abort-resolve") !== undefined;
-  // Every footer/state control and its palette twin holds while a write to THIS PR
+  // Every state control and its palette twin holds while a write to THIS PR
   // runs, or a stack merge cascading through its native stack; any other write
   // holds nothing here. Declared above the palette wiring so both share the exact
-  // same gate. A placeholder's details are another PR's and the footer's verbs
+  // same gate. A placeholder's details are another PR's and the actions' verbs
   // derive from them, so the same gate holds until it lands. A hold is not in
   // here: the held controls keep their look, and every handler and palette twin
   // refuses on `detailsStale` as well.
@@ -1433,7 +1412,7 @@ export function RemotePrView({
       onError(e);
     }
   }
-  // Palette twins of the footer's draft controls — same `setDraft` mutation, same
+  // Palette twins of the draft controls — same `setDraft` mutation, same
   // frozen identity, and Ready also fires the ready-review automation. Registration
   // is effect-synced, so an `enabled` term alone still leaves the keypress a frame
   // to land mid-switch; each handler re-checks the identity it is about to write.
@@ -1475,12 +1454,50 @@ export function RemotePrView({
       (m) => m.position === info.position + delta,
     );
   }
-  // An in-view hop: the hold's inert frame takes focus off the stack row the user
-  // moved to, so the member it named gets its row back once that PR is shown.
-  // Only a clicked member is a link hop; the arrow keys and the two stepping
-  // actions browse the stack like a list.
+  // GitLab members share a project and open verified document tabs. Other
+  // providers keep in-view stack browsing and its row-focus handoff.
   const stackHopRef = useRef<number | null>(null);
   function hopToStackMember(member: number, followed = false) {
+    if (providerKey === "gitlab") {
+      const current = details.data;
+      const target = current?.stackMembers.find((row) => row.number === member);
+      if (!current || !target || detailsStale) return;
+      const state = useUiStore.getState();
+      const source = state.workDocuments.documents.find(
+        (doc) =>
+          documentId(doc) === state.workDocuments.activeId &&
+          doc.repoPath === repoPath &&
+          doc.number === current.number,
+      );
+      try {
+        const url = new URL(current.url);
+        const project = url.pathname.match(
+          /^\/(.+)\/-\/merge_requests\/\d+\/?$/,
+        )?.[1];
+        if (!project || !["https:", "http:"].includes(url.protocol))
+          throw new Error("Unreadable merge request URL");
+        const repoFullName = source?.repoFullName ?? project;
+        void state.activateWorkDocument({
+          host: source?.host ?? url.host,
+          repoFullName,
+          number: target.number,
+          title: target.title,
+          repoPath,
+          repoName:
+            source?.repoName ??
+            state.repoName ??
+            repoFullName.split("/").at(-1) ??
+            repoPath,
+          url: `${url.origin}/${repoFullName}/-/merge_requests/${target.number}`,
+          section: "conversation",
+          selectedPath: null,
+          selectedCommitOid: null,
+        });
+      } catch {
+        toast.error("Couldn't identify this merge request's project.");
+      }
+      return;
+    }
     stackHopRef.current = member;
     if (followed) markLinkHop();
     selectPrWithAlign({ kind: "remote", id: String(member) });
@@ -2611,12 +2628,14 @@ export function RemotePrView({
   }
 
   async function doClose() {
-    // Re-checked in the handler: the footer disables on the same hold, but a
+    // Re-checked in the handler: the title row disables on the same hold, but a
     // click can land across a selection switch before the disable repaints.
     if (busy || detailsStale || triageBlocked || rideHold !== null) return;
     // Read at entry, before the confirm dialog takes focus: only a close fired
-    // from inside the footer may move focus when the footer swaps.
-    const ownsFocus = !!openFooterRef.current?.contains(document.activeElement);
+    // from inside the action group may move focus when its controls swap.
+    const ownsFocus = !!openActionsRef.current?.contains(
+      document.activeElement,
+    );
     // `closePr` follows the live repo once the awaits below have run.
     const closeIn = repoPath;
     // Captured before the await: posting clears the draft, and the error arm
@@ -2657,7 +2676,7 @@ export function RemotePrView({
       )
     )
       return;
-    if (ownsFocus) footerFocus.arm("reopen", entityKey);
+    if (ownsFocus) actionFocus.arm("reopen", entityKey);
     try {
       await closePr.mutateAsync({ number, lens });
       // The riding comment posts without the "Comment added" toast the ordinary
@@ -2668,7 +2687,7 @@ export function RemotePrView({
           : `Closed #${number}`,
       );
     } catch (e) {
-      footerFocus.disarm(entityKey);
+      actionFocus.disarm(entityKey);
       if (withComment)
         toastErrorWithNote(
           e,
@@ -2680,7 +2699,7 @@ export function RemotePrView({
 
   async function doReopen() {
     if (busy || detailsStale || triageBlocked || rideHold !== null) return;
-    const ownsFocus = !!reopenFooterRef.current?.contains(
+    const ownsFocus = !!reopenActionsRef.current?.contains(
       document.activeElement,
     );
     // `reopenPr` follows the live repo once the riding post has run.
@@ -2696,7 +2715,7 @@ export function RemotePrView({
       )
     )
       return;
-    if (ownsFocus) footerFocus.arm("close", entityKey);
+    if (ownsFocus) actionFocus.arm("close", entityKey);
     try {
       await reopenPr.mutateAsync({ number, lens });
       toast.success(
@@ -2705,7 +2724,7 @@ export function RemotePrView({
           : `Reopened #${number}`,
       );
     } catch (e) {
-      footerFocus.disarm(entityKey);
+      actionFocus.disarm(entityKey);
       if (withComment)
         toastErrorWithNote(
           e,
@@ -2922,6 +2941,7 @@ export function RemotePrView({
   // the hold's and the reveal guard's inputs (top).
   if (hold.shownKey !== lastShown) {
     setLastShown(hold.shownKey);
+    setHeaderExpanded(false);
     setSelectedPath(null);
     setSelectedCommitOid(null);
     closePerPrDialogs();
@@ -2953,7 +2973,7 @@ export function RemotePrView({
     );
 
   // Auto-merge derived state (GitLab-only). The arm affordance shows only while the
-  // head pipeline is in flight; the footer indicator shows once armed. Both classify
+  // head pipeline is in flight; the header indicator shows once armed. Both classify
   // the pipeline status against the same shared in-flight set as the poll.
   const pipelineInFlight = (PIPELINE_IN_FLIGHT as readonly string[]).includes(
     mergeState.data?.pipelineStatus ?? "",
@@ -3190,6 +3210,25 @@ export function RemotePrView({
           : cachedPrRow(queryClient, repoPath, lens, entityKeyNumber(liveKey)),
     });
   }
+  const titlePr = showsLoadingFrame
+    ? frameRow?.key === liveKey
+      ? frameRow.row
+      : undefined
+    : detailsPlaceholder
+      ? undefined
+      : pr;
+  const windowRequestTitle = titlePr
+    ? `${titlePr.state.toLowerCase()}${titlePr.state === "OPEN" && titlePr.isDraft ? " · Draft" : ""} · ${titlePr.title} #${titlePr.number}`
+    : `${prNoun} #${number}`;
+  // The standalone document owns the native title; deferred and hidden views
+  // must not overwrite the selected request's identity.
+  useEffect(() => {
+    if (windowTitleSuffix === undefined || !isSelectedPr || repoTab !== "pulls")
+      return;
+    getCurrentWindow()
+      .setTitle(`${windowRequestTitle} — ${windowTitleSuffix}`)
+      .catch(() => undefined);
+  }, [windowTitleSuffix, windowRequestTitle, isSelectedPr, repoTab]);
   // A stack hop lands its focus back on the member's row once that PR is on
   // screen; until then the hold's sink (or the loading frame) has it. Focus the
   // user moved out of the view in the meantime stays where they put it.
@@ -3222,12 +3261,11 @@ export function RemotePrView({
       </HeldFrame>
     </div>
   );
-  // The footers' gates, shared by their JSX and their toast clearance. The
-  // clearance runs above every early return, so it also requires the loaded view
-  // to be the arm painted (no loading frame, offline or error arm, or resolve).
-  const openFooterShown =
+  // Action availability is shared by the title row and close/reopen focus handoff.
+  // Only the loaded, visible view can accept the resulting focus claim.
+  const openActionsShown =
     pr?.state === "OPEN" && (canChangeState || canMerge || canWrite);
-  const reopenFooterShown =
+  const reopenActionsShown =
     pr?.state === "CLOSED" && canChangeState && provider !== "bitbucket";
   const loadedViewPainted =
     !showsLoadingFrame &&
@@ -3235,10 +3273,8 @@ export function RemotePrView({
     detailPane !== "error" &&
     pr !== undefined &&
     !resolve;
-  const openFooterRef = useRef<HTMLDivElement>(null);
-  const reopenFooterRef = useRef<HTMLDivElement>(null);
-  useToastClearance(openFooterRef, loadedViewPainted && openFooterShown);
-  useToastClearance(reopenFooterRef, loadedViewPainted && reopenFooterShown);
+  const openActionsRef = useRef<HTMLDivElement>(null);
+  const reopenActionsRef = useRef<HTMLDivElement>(null);
   // The split Checkout's gate (open PR, write access, loaded header painted),
   // so the palette opens the worktree popover only where its control stands.
   const worktreeCheckout = useRef<PrWorktreeCheckoutHandle>(null);
@@ -3253,10 +3289,10 @@ export function RemotePrView({
   );
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const reopenButtonRef = useRef<HTMLButtonElement>(null);
-  const footerFocus = useFooterFocusSwap({
+  const actionFocus = useFooterFocusSwap({
     entityKey,
-    closeShown: loadedViewPainted && openFooterShown,
-    reopenShown: loadedViewPainted && reopenFooterShown,
+    closeShown: loadedViewPainted && openActionsShown,
+    reopenShown: loadedViewPainted && reopenActionsShown,
     closeRef: closeButtonRef,
     reopenRef: reopenButtonRef,
   });
@@ -3266,14 +3302,57 @@ export function RemotePrView({
     // open PR is assumed, the common case.
     const row = frameRow?.key === liveKey ? frameRow.row : undefined;
     const rowOpen = row === undefined || row.state === "OPEN";
-    const author = row?.author?.login ?? "";
     return framed(
       <PrLoadingFrame
+        titleInWindow={titleInWindow}
         noun={prNoun}
         title={row?.title}
         number={row?.number ?? number}
         actions={
           <>
+            {rowOpen && draftPairVisible && (
+              <DisabledReasonButton
+                variant="outline"
+                size="xs"
+                disabled
+                reason={PR_SWITCH_LOADING_REASON}
+              >
+                {row?.isDraft ? "Ready for review" : "Convert to draft"}
+              </DisabledReasonButton>
+            )}
+            {rowOpen && canChangeState && (
+              <DisabledReasonButton
+                variant="outline"
+                size="xs"
+                disabled
+                reason={PR_SWITCH_LOADING_REASON}
+              >
+                Close
+              </DisabledReasonButton>
+            )}
+            {rowOpen && canMerge && (
+              <DisabledReasonButton
+                size="xs"
+                disabled
+                reason={PR_SWITCH_LOADING_REASON}
+              >
+                <GitMergeIcon data-icon="inline-start" />
+                Merge
+                <CaretDownIcon data-icon="inline-end" />
+              </DisabledReasonButton>
+            )}
+            {row?.state === "CLOSED" &&
+              canChangeState &&
+              provider !== "bitbucket" && (
+                <DisabledReasonButton
+                  variant="outline"
+                  size="xs"
+                  disabled
+                  reason={PR_SWITCH_LOADING_REASON}
+                >
+                  Reopen
+                </DisabledReasonButton>
+              )}
             {rowOpen && canCheckout && (
               <span className={CHECKOUT_SPLIT_CLASS}>
                 {/* The row carries no head owner, so only a known non-fork
@@ -3323,38 +3402,17 @@ export function RemotePrView({
             </DisabledReasonButton>
           </>
         }
-        meta={
-          row === undefined ? (
-            <>
-              <Skeleton className="h-5 w-12" />
-              <Skeleton className="size-6 rounded-full" />
-              <Skeleton className="h-4 w-56 max-w-full" />
-            </>
-          ) : (
-            <>
-              <Badge variant={rowOpen ? "default" : "secondary"}>
-                {row.isDraft ? "Draft" : row.state.toLowerCase()}
-              </Badge>
-              {author ? (
-                <ForgeUserAvatar login={author} ghHost={ghHost} decorative />
-              ) : null}
-              <span>{displayLogin(author)}</span>
-              <span>•</span>
-              <span className="font-mono">{row.headRefName}</span>
-              <span>→</span>
-              <span className="font-mono">{row.baseRefName}</span>
-              <Skeleton className="h-4 w-16" />
-            </>
-          )
+        state={
+          <Badge variant={rowOpen ? "default" : "secondary"}>
+            {row === undefined ? (
+              <Skeleton className="h-4 w-8" />
+            ) : row.isDraft ? (
+              "Draft"
+            ) : (
+              row.state.toLowerCase()
+            )}
+          </Badge>
         }
-        // The editable fields an OPEN pull request draws, in the loaded grid's
-        // order; board field values join only for a PR already on a board.
-        userFields={[
-          ...(rowOpen && canEditLabels ? [false] : []),
-          ...(rowOpen && canEditAssignees ? [true] : []),
-          ...(canWrite ? [false] : []),
-          ...(rowOpen && canEditReviewers ? [true] : []),
-        ]}
         tabs={availableSections.map((s) => (
           <Button
             key={s}
@@ -3391,7 +3449,6 @@ export function RemotePrView({
             />
           ) : null
         }
-        footer={rowOpen && (canChangeState || canMerge || canWrite)}
       />,
     );
   }
@@ -3840,7 +3897,7 @@ export function RemotePrView({
 
   // A conflict resolution in flight takes over the whole PR view: the merge lives in
   // an isolated worktree, and ResolveRemotePrView drives its file list, editor and
-  // Finish/Discard in place of the PR's normal sections and footer.
+  // Finish/Discard in place of the PR's normal sections and toolbar.
   if (resolve) {
     return (
       <div className="flex h-full flex-col">
@@ -4126,6 +4183,18 @@ export function RemotePrView({
     );
   }
 
+  const sectionTabs = availableSections.map((s) => (
+    <Button
+      key={s}
+      variant={section === s ? "secondary" : "ghost"}
+      size="xs"
+      aria-pressed={section === s}
+      onClick={() => pickSection(s)}
+    >
+      {SECTION_LABEL[s](pr)}
+    </Button>
+  ));
+
   return framed(
     <>
       <DegradedListNotice
@@ -4135,17 +4204,251 @@ export function RemotePrView({
         onRetry={detailFailed ? () => details.refetch() : undefined}
         className="shrink-0 border-b px-4 py-1.5"
       />
-      <header className="@container/pr-header space-y-2 border-b px-4 py-3">
+      <header className="@container/pr-header space-y-2 border-b px-4 py-2">
+        {titleInWindow && (
+          <h2 className="sr-only">
+            {pr.state.toLowerCase()} · {pr.title} #{pr.number}
+          </h2>
+        )}
         <DetailTitleRow
+          headingAs={titleInWindow ? "div" : "h2"}
+          headingClassName={
+            titleInWindow ? "flex flex-wrap items-center gap-1" : undefined
+          }
           heading={
             <>
-              {pr.title}{" "}
-              <span className="font-normal text-muted-foreground">
-                #{pr.number}
-              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="mr-1 cursor-pointer align-middle"
+                aria-expanded={headerExpanded}
+                aria-controls={headerDetailsId}
+                aria-label={`${headerExpanded ? "Hide" : "Show"} ${prNoun} details`}
+                title={`${headerExpanded ? "Hide" : "Show"} ${prNoun} details`}
+                onClick={() => setHeaderExpanded((expanded) => !expanded)}
+              >
+                <CaretRightIcon
+                  aria-hidden
+                  className={cn(
+                    "transition-transform duration-150 motion-reduce:transition-none",
+                    headerExpanded && "rotate-90",
+                  )}
+                />
+              </Button>
+              {titleInWindow ? (
+                sectionTabs
+              ) : (
+                <>
+                  <Badge
+                    variant={pr.state === "OPEN" ? "default" : "secondary"}
+                    className="mr-2 align-middle"
+                  >
+                    {pr.isDraft ? "Draft" : pr.state.toLowerCase()}
+                  </Badge>
+                  {pr.title}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    #{pr.number}
+                  </span>
+                </>
+              )}
             </>
           }
         >
+          {/* Request state actions stay in the title row, individually gated by
+          provider support, permissions and pending writes. */}
+          {openActionsShown && (
+            <div
+              ref={openActionsRef}
+              className="flex flex-wrap items-center gap-2"
+            >
+              {/* One Ready / Convert-to-draft pair for all three providers: GitLab
+              (`glab mr update`) and Bitbucket (PUT `draft`) via `canToggleDraft`;
+              GitHub folds in via `canWrite` and routes the same `setDraft` mutation
+              through `gh pr ready [--undo]`. Draft → primary Ready (fires the
+              ready-review automation); open → a quieter Convert-to-draft. */}
+              {draftPairVisible && shownIsDraft === true && (
+                <DisabledReasonButton
+                  variant="outline"
+                  size="xs"
+                  disabled={busy || writeBlocked}
+                  reason={writeReason ?? composerReason}
+                  onClick={() => void markReadyForReview()}
+                >
+                  Ready for review
+                </DisabledReasonButton>
+              )}
+              {draftPairVisible && shownIsDraft === false && (
+                <DisabledReasonButton
+                  variant="ghost"
+                  size="xs"
+                  disabled={busy || writeBlocked}
+                  reason={writeReason ?? composerReason}
+                  title={`Turn this ${prNoun} back into a draft`}
+                  onClick={() => void convertToDraft()}
+                >
+                  Convert to draft
+                </DisabledReasonButton>
+              )}
+              {/* The merge is in the forge's queue, not landed. Same icon + words
+              shape as the auto-merge chip below (not color-alone), and it stands
+              until the pull request itself leaves OPEN — read behind the same
+              placeholder gate as the retraction, so a lagging `details` can't
+              blank the chip during a PR switch. */}
+              {mergeQueued && isOpenPr && queuedDetailsReady && (
+                <span
+                  className="flex items-center gap-1 text-xs text-info"
+                  title={
+                    queuedWarning?.key === queuedKey
+                      ? queuedWarning.text
+                      : "Merges when the queue reaches it"
+                  }
+                >
+                  <ClockCountdownIcon className="size-3.5 shrink-0" />
+                  Queued to merge
+                </span>
+              )}
+              {/* Auto-merge armed indicator + cancel (GitLab-only) — sits on the left,
+              opposite Close/Merge. Not color-alone: icon + words. */}
+              {canAutoMerge && autoMergeArmed && (
+                <div className="flex items-center gap-2">
+                  <span
+                    className="flex items-center gap-1 text-xs text-info"
+                    title={
+                      mergeState.data?.pipelineStatus
+                        ? `Merges when the pipeline passes — pipeline: ${mergeState.data.pipelineStatus}`
+                        : "Merges when the pipeline passes"
+                    }
+                  >
+                    <ClockCountdownIcon className="size-3.5 shrink-0" />
+                    Auto-merge enabled
+                  </span>
+                  <DisabledReasonButton
+                    variant="outline"
+                    size="xs"
+                    disabled={busy || writeBlocked}
+                    reason={writeReason ?? composerReason}
+                    onClick={() => void doCancelAutoMerge()}
+                  >
+                    Cancel auto-merge
+                  </DisabledReasonButton>
+                </div>
+              )}
+              {canChangeState && (
+                // The label swaps while a draft rides along: the action changed
+                // meaning, and only the label reaches a viewer before the click.
+                <DisabledReasonButton
+                  variant="outline"
+                  size="xs"
+                  ref={closeButtonRef}
+                  disabled={
+                    busy || triageBlocked || !!offlineHold || rideHold !== null
+                  }
+                  reason={
+                    triageReason ?? composerReason ?? offlineHold ?? rideHold
+                  }
+                  onClick={doClose}
+                  title={
+                    draftRidesStateChange
+                      ? "Closes and posts your draft as a comment"
+                      : undefined
+                  }
+                >
+                  {draftRidesStateChange ? "Close with comment" : "Close"}
+                </DisabledReasonButton>
+              )}
+              {canMerge && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <DisabledReasonButton
+                        size="xs"
+                        disabled={mergeBlocked}
+                        reason={mergeReason}
+                        title={mergeReason}
+                      />
+                    }
+                  >
+                    <GitMergeIcon data-icon="inline-start" />
+                    Merge
+                    <CaretDownIcon data-icon="inline-end" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    {/* Branch-rule gating is GitHub branch-protection data, so it
+                    never applies to GitLab/Bitbucket. */}
+                    {PROVIDER_MERGE_STRATEGIES[providerKey].map((s) => {
+                      const isGitHub =
+                        provider !== "gitlab" &&
+                        provider !== "bitbucket" &&
+                        // Bitbucket's "fast_forward" isn't a GitHub MergeMethod and
+                        // never reaches this arm (bitbucket is excluded above) — the
+                        // narrowing also keeps `s` a valid MergeMethod for the checks.
+                        s !== "fast_forward";
+                      // Repo-level server setting; only an explicit `false` disables
+                      // (unknown never gates).
+                      const serverDisabled =
+                        isGitHub && isServerMergeDisabled(pr, s);
+                      const locallyBlocked =
+                        isGitHub &&
+                        !isMergeMethodAllowed(rulesConfig, pr.baseRefName, s);
+                      const blocked = serverDisabled || locallyBlocked;
+                      return (
+                        <DropdownMenuItem
+                          key={s}
+                          disabled={blocked}
+                          onClick={() => openMergeDialog(s, false)}
+                        >
+                          {MERGE_LABEL[s]}
+                          {serverDisabled
+                            ? " — disabled in repository settings"
+                            : locallyBlocked && " — blocked by branch rule"}
+                        </DropdownMenuItem>
+                      );
+                    })}
+                    {/* GitLab auto-merge: while the head pipeline is in flight and not
+                    already armed, offer merge-when-pipeline-succeeds variants. */}
+                    {canAutoMerge && pipelineInFlight && !autoMergeArmed && (
+                      <>
+                        <DropdownMenuSeparator />
+                        {(["merge", "squash"] as const).map((s) => (
+                          <DropdownMenuItem
+                            key={`auto-${s}`}
+                            title="Merges when the running pipeline succeeds"
+                            onClick={() => openMergeDialog(s, true)}
+                          >
+                            Auto-merge: {MERGE_LABEL[s]}
+                          </DropdownMenuItem>
+                        ))}
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          )}
+
+          {/* Bitbucket declined PRs can't be reopened — no API or web affordance, so
+          hide it (unlike GitHub/GitLab). */}
+          {reopenActionsShown && (
+            <div ref={reopenActionsRef} className="flex items-center gap-2">
+              <DisabledReasonButton
+                variant="outline"
+                size="xs"
+                ref={reopenButtonRef}
+                disabled={busy || triageBlocked || rideHold !== null}
+                reason={triageReason ?? composerReason ?? rideHold}
+                onClick={doReopen}
+                title={
+                  draftRidesStateChange
+                    ? "Reopens and posts your draft as a comment"
+                    : undefined
+                }
+              >
+                <ArrowCounterClockwiseIcon data-icon="inline-start" />
+                {draftRidesStateChange ? "Reopen with comment" : "Reopen"}
+              </DisabledReasonButton>
+            </div>
+          )}
+
           {isOpen && canCheckout && (
             <PrWorktreeCheckout
               ref={worktreeCheckout}
@@ -4231,99 +4534,137 @@ export function RemotePrView({
             {hostName ?? OPEN_IN_BROWSER}
           </Button>
         </DetailTitleRow>
-        <JiraRefRow
-          repoPath={repoPath}
-          sources={[
-            { label: "title", text: pr.title },
-            { label: "description", text: pr.body },
-            { label: "branch name", text: pr.headRefName },
-          ]}
-        />
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant={pr.state === "OPEN" ? "default" : "secondary"}>
-            {pr.isDraft ? "Draft" : pr.state.toLowerCase()}
-          </Badge>
-          {pr.locked === true && (
-            <Badge variant="secondary">
-              locked
-              {pr.activeLockReason
-                ? ` · ${pr.activeLockReason.replace(/_/g, "-")}`
-                : ""}
-            </Badge>
-          )}
-          <AuthorAvatar login={pr.author} avatarUrl={pr.authorAvatarUrl} />
-          <span>{displayLogin(pr.author)}</span>
-          <span>•</span>
-          <span className="font-mono">{pr.headRefName}</span>
-          <span>→</span>
-          <span className="font-mono">{pr.baseRefName}</span>
-          {/* Hidden while `totalsUnknown`; the Files notice explains the gap. */}
-          {!totalsUnknown && (
-            <DiffStat
-              added={pr.additions}
-              deleted={pr.deletions}
-              className="flex items-center gap-2"
-            />
-          )}
-        </div>
-        {/* One label/value grid for every meta field, two pairs wide until the
+        <div id={headerDetailsId} hidden={!headerExpanded}>
+          <TabPanel active={headerExpanded}>
+            <div className="space-y-2">
+              <JiraRefRow
+                repoPath={repoPath}
+                sources={[
+                  { label: "title", text: pr.title },
+                  { label: "description", text: pr.body },
+                  { label: "branch name", text: pr.headRefName },
+                ]}
+              />
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                {pr.locked === true && (
+                  <Badge variant="secondary">
+                    locked
+                    {pr.activeLockReason
+                      ? ` · ${pr.activeLockReason.replace(/_/g, "-")}`
+                      : ""}
+                  </Badge>
+                )}
+                <AuthorAvatar
+                  login={pr.author}
+                  avatarUrl={pr.authorAvatarUrl}
+                />
+                <span>{displayLogin(pr.author)}</span>
+                <span>•</span>
+                <span className="font-mono">{pr.headRefName}</span>
+                <span>→</span>
+                <span className="font-mono">{pr.baseRefName}</span>
+                {/* Hidden while `totalsUnknown`; the Files notice explains the gap. */}
+                {!totalsUnknown && (
+                  <DiffStat
+                    added={pr.additions}
+                    deleted={pr.deletions}
+                    className="flex items-center gap-2"
+                  />
+                )}
+              </div>
+              {/* One label/value grid for every meta field, two pairs wide until the
             PANEL (not the viewport) is too narrow for them — the PR view's width
             tracks its panel, so this is a container query. `minmax(0,…)` lets a
             dense chip cell shrink instead of overflowing the header. */}
-        {metaCells.length > 0 ? (
-          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 text-xs @3xl/pr-header:grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)]">
-            {metaCells}
-          </div>
-        ) : null}
-        {/* Verdicts ride their own sub-read; without them an assigned reviewer's
+              {metaCells.length > 0 ? (
+                <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 text-xs @3xl/pr-header:grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)]">
+                  {metaCells}
+                </div>
+              ) : null}
+              {/* Verdicts ride their own sub-read; without them an assigned reviewer's
             plain chip would read as still pending. Gated on the flag alone:
             GitLab skips the verdicts read when nobody is assigned (so it stays
             false), while on GitHub acted reviewers leave the assigned list, so
             an empty list with unknown verdicts still hides finished reviews. */}
-        <DegradedListNotice
-          noun="review status"
-          degraded={pr.reviewersUnknown}
-          message={
-            details.isPaused
-              ? offlinePendingMessage("review status")
-              : "Couldn't fully load review status — reviewers may show without their latest verdicts."
-          }
-          onRetry={details.isPaused ? undefined : () => void details.refetch()}
-          className="px-0 pb-0"
-        />
-        {/* GitLab-only time-tracking summary; a popover with estimate/add-spent
+              <DegradedListNotice
+                noun="review status"
+                degraded={pr.reviewersUnknown}
+                message={
+                  details.isPaused
+                    ? offlinePendingMessage("review status")
+                    : "Couldn't fully load review status — reviewers may show without their latest verdicts."
+                }
+                onRetry={
+                  details.isPaused ? undefined : () => void details.refetch()
+                }
+                className="px-0 pb-0"
+              />
+              {/* GitLab-only time-tracking summary; a popover with estimate/add-spent
             while the MR is open, static once closed. */}
-        {canTrackTime && (
-          <MrTimeTracking
-            // Keyed on the MR on screen: its popover holds a typed duration, which
-            // must never submit against the MR that replaces it.
-            key={`time-${hold.shownKey}`}
-            repoPath={repoPath}
-            number={shownNumber}
-            open={isOpen}
-            // The stats carry no placeholder and the writes address the shown
-            // number; a hold shuts the portaled popover (out of `inert`'s reach)
-            // and refuses its writes, so a held MR is never written mid-switch.
-            held={hold.holding}
-            disabledReason={triageReason}
-          />
-        )}
-        {/* Bitbucket-only PR-tasks chip — quiet until there are unresolved tasks;
+              {canTrackTime && (
+                <MrTimeTracking
+                  // Keyed on the MR on screen: its popover holds a typed duration, which
+                  // must never submit against the MR that replaces it.
+                  key={`time-${hold.shownKey}`}
+                  repoPath={repoPath}
+                  number={shownNumber}
+                  open={isOpen}
+                  // The stats carry no placeholder and the writes address the shown
+                  // number; a hold shuts the portaled popover (out of `inert`'s reach)
+                  // and refuses its writes, so a held MR is never written mid-switch.
+                  held={hold.holding}
+                  disabledReason={triageReason}
+                />
+              )}
+              {/* Bitbucket-only PR-tasks chip — quiet until there are unresolved tasks;
             jumps to the Tasks section. Same usePrTasks query as the section. */}
-        {canTasks && (
-          <PrTasksChip
-            repoPath={repoPath}
-            number={shownNumber}
-            onView={() => {
-              pickSection("conversation");
-              setTasksScrollFor(hold.shownKey);
-            }}
-          />
-        )}
+              {canTasks && (
+                <PrTasksChip
+                  repoPath={repoPath}
+                  number={shownNumber}
+                  onView={() => {
+                    pickSection("conversation");
+                    setTasksScrollFor(hold.shownKey);
+                  }}
+                />
+              )}
+              {/* Keyed per PR: the rollup latches its auto-open and remembers the
+            collapse you chose, and this view swaps PRs without remounting. The
+            SETTLED identity, not the live one — `pr` is the previous PR's
+            placeholder until fresh details land, and seeding off those would
+            auto-expand the new PR from the old one's checks. Nothing settled yet
+            gets a per-PR `pending-` key, so the settle still remounts and two
+            placeholder PRs never share one. */}
+              <ChecksRollup
+                key={settledEntityKey ?? `pending-${entityKey}`}
+                checks={pr.checks}
+                checksUnknown={pr.checksUnknown}
+                checksTruncated={pr.checksTruncated}
+                detailsPaused={details.isPaused}
+                onRetryChecks={() => void details.refetch()}
+                repoPath={repoPath}
+                provider={providerKey}
+                headSha={prHeadSha(pr) ?? null}
+                crossRepository={!!pr.crossRepository}
+                unmetRequiredContexts={blockedRequirements}
+                // Split like the view's own controls: `stale` withdraws the offers, so
+                // only a placeholder may set it. A hold, and the one urgent render in
+                // which the deferred `number` lags the store's selection, keep them
+                // drawn and refuse through `held`; a render gate on that lag flickers.
+                stale={detailsPlaceholder}
+                held={hold.holding || !isSelectedPr}
+              />
+            </div>
+          </TabPanel>
+        </div>
         {/* Stack members, bottom-first — self-hiding for an unstacked PR, so an
             unstacked header is unchanged. Mutually exclusive with the offer
             below it: an offer only exists while this PR is unstacked. */}
         <StackSection
+          key={JSON.stringify([
+            entityKeyScope(hold.shownKey),
+            pr.stack?.id ?? null,
+          ])}
           stack={pr.stack}
           members={pr.stackMembers}
           membersUnknown={pr.membersUnknown}
@@ -4368,45 +4709,9 @@ export function RemotePrView({
         {stackOfferNote ? (
           <p className="text-xs text-muted-foreground">{stackOfferNote}</p>
         ) : null}
-        {/* Keyed per PR: the rollup latches its auto-open and remembers the
-            collapse you chose, and this view swaps PRs without remounting. The
-            SETTLED identity, not the live one — `pr` is the previous PR's
-            placeholder until fresh details land, and seeding off those would
-            auto-expand the new PR from the old one's checks. Nothing settled yet
-            gets a per-PR `pending-` key, so the settle still remounts and two
-            placeholder PRs never share one. */}
-        <ChecksRollup
-          key={settledEntityKey ?? `pending-${entityKey}`}
-          checks={pr.checks}
-          checksUnknown={pr.checksUnknown}
-          checksTruncated={pr.checksTruncated}
-          detailsPaused={details.isPaused}
-          onRetryChecks={() => void details.refetch()}
-          repoPath={repoPath}
-          provider={providerKey}
-          headSha={prHeadSha(pr) ?? null}
-          crossRepository={!!pr.crossRepository}
-          unmetRequiredContexts={blockedRequirements}
-          // Split like the view's own controls: `stale` withdraws the offers, so
-          // only a placeholder may set it. A hold, and the one urgent render in
-          // which the deferred `number` lags the store's selection, keep them
-          // drawn and refuse through `held`; a render gate on that lag flickers.
-          stale={detailsPlaceholder}
-          held={hold.holding || !isSelectedPr}
-        />
-        <div className="flex flex-wrap gap-1 pt-1">
-          {availableSections.map((s) => (
-            <Button
-              key={s}
-              variant={section === s ? "secondary" : "ghost"}
-              size="xs"
-              aria-pressed={section === s}
-              onClick={() => pickSection(s)}
-            >
-              {SECTION_LABEL[s](pr)}
-            </Button>
-          ))}
-        </div>
+        {!titleInWindow && (
+          <div className="flex flex-wrap gap-1 pt-1">{sectionTabs}</div>
+        )}
       </header>
 
       <PrMergeabilityBanner
@@ -5116,6 +5421,10 @@ export function RemotePrView({
           {!filesMissing && (
             <PrFilesPane
               files={pr.files}
+              interactionEnabled={
+                isSelectedPr && !detailsStale && hold.interactive
+              }
+              changesIncomplete={pr.filesUnknown || pr.filesTruncated}
               binaryPaths={binaryPaths}
               effectivePath={effectivePath}
               onSelectPath={pickPath}
@@ -5124,7 +5433,10 @@ export function RemotePrView({
               isError={prDiff.isError}
               isPaused={prDiff.isPaused}
               isFetching={prDiff.isFetching}
-              onRetry={() => void prDiff.refetch()}
+              onRetry={() => {
+                void details.refetch();
+                void prDiff.refetch();
+              }}
               dataIsPlaceholder={prDiff.isPlaceholderData}
               // The same threads + handlers/gates the Conversation block uses — one
               // filtered list off the top-level read, not a second fetch, so an
@@ -5163,208 +5475,14 @@ export function RemotePrView({
               mentions={mentions}
               // Pin the file-row Blame at the forge-reported tip: GitHub's capped
               // commits list can end short of it.
-              blameRev={prHeadSha(pr)}
+              blameRev={
+                pr.headSha ||
+                (!pr.commitsUnknown && !pr.commitsTruncated
+                  ? prHeadSha(pr)
+                  : undefined)
+              }
             />
           )}
-        </div>
-      )}
-
-      {/* The open-MR footer hosts Close + Merge alongside the shared Ready /
-          Convert-to-draft pair — shown when any is available, each control gated
-          individually. */}
-      {openFooterShown && (
-        <div
-          ref={openFooterRef}
-          className="flex flex-wrap items-center gap-2 border-t p-3"
-        >
-          {/* One Ready / Convert-to-draft pair for all three providers: GitLab
-              (`glab mr update`) and Bitbucket (PUT `draft`) via `canToggleDraft`;
-              GitHub folds in via `canWrite` and routes the same `setDraft` mutation
-              through `gh pr ready [--undo]`. Draft → primary Ready (fires the
-              ready-review automation); open → a quieter Convert-to-draft. */}
-          {draftPairVisible && shownIsDraft === true && (
-            <DisabledReasonButton
-              variant="outline"
-              size="sm"
-              disabled={busy || writeBlocked}
-              reason={writeReason ?? composerReason}
-              onClick={() => void markReadyForReview()}
-            >
-              Ready for review
-            </DisabledReasonButton>
-          )}
-          {draftPairVisible && shownIsDraft === false && (
-            <DisabledReasonButton
-              variant="ghost"
-              size="sm"
-              disabled={busy || writeBlocked}
-              reason={writeReason ?? composerReason}
-              title={`Turn this ${prNoun} back into a draft`}
-              onClick={() => void convertToDraft()}
-            >
-              Convert to draft
-            </DisabledReasonButton>
-          )}
-          {/* The merge is in the forge's queue, not landed. Same icon + words
-              shape as the auto-merge chip below (not color-alone), and it stands
-              until the pull request itself leaves OPEN — read behind the same
-              placeholder gate as the retraction, so a lagging `details` can't
-              blank the chip during a PR switch. */}
-          {mergeQueued && isOpenPr && queuedDetailsReady && (
-            <span
-              className="flex items-center gap-1 text-xs text-info"
-              title={
-                queuedWarning?.key === queuedKey
-                  ? queuedWarning.text
-                  : "Merges when the queue reaches it"
-              }
-            >
-              <ClockCountdownIcon className="size-3.5 shrink-0" />
-              Queued to merge
-            </span>
-          )}
-          {/* Auto-merge armed indicator + cancel (GitLab-only) — sits on the left,
-              opposite Close/Merge. Not color-alone: icon + words. */}
-          {canAutoMerge && autoMergeArmed && (
-            <div className="flex items-center gap-2">
-              <span
-                className="flex items-center gap-1 text-xs text-info"
-                title={
-                  mergeState.data?.pipelineStatus
-                    ? `Merges when the pipeline passes — pipeline: ${mergeState.data.pipelineStatus}`
-                    : "Merges when the pipeline passes"
-                }
-              >
-                <ClockCountdownIcon className="size-3.5 shrink-0" />
-                Auto-merge enabled
-              </span>
-              <DisabledReasonButton
-                variant="outline"
-                size="sm"
-                disabled={busy || writeBlocked}
-                reason={writeReason ?? composerReason}
-                onClick={() => void doCancelAutoMerge()}
-              >
-                Cancel auto-merge
-              </DisabledReasonButton>
-            </div>
-          )}
-          <span className="flex-1" />
-          {canChangeState && (
-            // The label swaps while a draft rides along: the action changed
-            // meaning, and only the label reaches a viewer before the click.
-            <DisabledReasonButton
-              variant="outline"
-              size="sm"
-              ref={closeButtonRef}
-              disabled={
-                busy || triageBlocked || !!offlineHold || rideHold !== null
-              }
-              reason={triageReason ?? composerReason ?? offlineHold ?? rideHold}
-              onClick={doClose}
-              title={
-                draftRidesStateChange
-                  ? "Closes and posts your draft as a comment"
-                  : undefined
-              }
-            >
-              {draftRidesStateChange ? "Close with comment" : "Close"}
-            </DisabledReasonButton>
-          )}
-          {canMerge && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <DisabledReasonButton
-                    size="sm"
-                    disabled={mergeBlocked}
-                    reason={mergeReason}
-                    title={mergeReason}
-                  />
-                }
-              >
-                <GitMergeIcon data-icon="inline-start" />
-                Merge
-                <CaretDownIcon data-icon="inline-end" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                {/* Branch-rule gating is GitHub branch-protection data, so it
-                    never applies to GitLab/Bitbucket. */}
-                {PROVIDER_MERGE_STRATEGIES[providerKey].map((s) => {
-                  const isGitHub =
-                    provider !== "gitlab" &&
-                    provider !== "bitbucket" &&
-                    // Bitbucket's "fast_forward" isn't a GitHub MergeMethod and
-                    // never reaches this arm (bitbucket is excluded above) — the
-                    // narrowing also keeps `s` a valid MergeMethod for the checks.
-                    s !== "fast_forward";
-                  // Repo-level server setting; only an explicit `false` disables
-                  // (unknown never gates).
-                  const serverDisabled =
-                    isGitHub && isServerMergeDisabled(pr, s);
-                  const locallyBlocked =
-                    isGitHub &&
-                    !isMergeMethodAllowed(rulesConfig, pr.baseRefName, s);
-                  const blocked = serverDisabled || locallyBlocked;
-                  return (
-                    <DropdownMenuItem
-                      key={s}
-                      disabled={blocked}
-                      onClick={() => openMergeDialog(s, false)}
-                    >
-                      {MERGE_LABEL[s]}
-                      {serverDisabled
-                        ? " — disabled in repository settings"
-                        : locallyBlocked && " — blocked by branch rule"}
-                    </DropdownMenuItem>
-                  );
-                })}
-                {/* GitLab auto-merge: while the head pipeline is in flight and not
-                    already armed, offer merge-when-pipeline-succeeds variants. */}
-                {canAutoMerge && pipelineInFlight && !autoMergeArmed && (
-                  <>
-                    <DropdownMenuSeparator />
-                    {(["merge", "squash"] as const).map((s) => (
-                      <DropdownMenuItem
-                        key={`auto-${s}`}
-                        title="Merges when the running pipeline succeeds"
-                        onClick={() => openMergeDialog(s, true)}
-                      >
-                        Auto-merge: {MERGE_LABEL[s]}
-                      </DropdownMenuItem>
-                    ))}
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      )}
-
-      {/* Bitbucket declined PRs can't be reopened — no API or web affordance, so
-          hide it (unlike GitHub/GitLab). */}
-      {reopenFooterShown && (
-        <div
-          ref={reopenFooterRef}
-          className="flex items-center gap-2 border-t p-3"
-        >
-          <span className="flex-1" />
-          <DisabledReasonButton
-            variant="outline"
-            size="sm"
-            ref={reopenButtonRef}
-            disabled={busy || triageBlocked || rideHold !== null}
-            reason={triageReason ?? composerReason ?? rideHold}
-            onClick={doReopen}
-            title={
-              draftRidesStateChange
-                ? "Reopens and posts your draft as a comment"
-                : undefined
-            }
-          >
-            <ArrowCounterClockwiseIcon data-icon="inline-start" />
-            {draftRidesStateChange ? "Reopen with comment" : "Reopen"}
-          </DisabledReasonButton>
         </div>
       )}
 

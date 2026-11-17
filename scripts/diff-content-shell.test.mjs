@@ -1405,7 +1405,7 @@ const PR_COMMIT = `${PULLS}/PrCommitDetail.tsx`;
  *  DiffSurface and DiffViewer forward no anchor at all; GitDiffView renders
  *  text only, never the binary arm. */
 const PR_ANCHOR_HOPS = {
-  DiffContent: 2,
+  DiffContent: 3,
   PrFileDiffSlot: 1,
   BinaryFileSummary: 0,
   DiffSurface: 0,
@@ -1529,7 +1529,7 @@ test("pull request hosts hand every binary-size hop an anchor commit", () => {
       PR_COMMIT,
       "export function PrCommitDetail(",
       'function NewHost() {\n  return <DiffContent filePath="x" anchorCommit="y" />;\n}\n\nexport function PrCommitDetail(',
-      "renders <DiffContent> 3x",
+      "renders <DiffContent> 4x",
     ],
     [
       PR_COMMIT,

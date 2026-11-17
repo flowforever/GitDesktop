@@ -330,7 +330,32 @@ export const capabilities: Capability[] = [
   {
     group: "Pull requests & review",
     label:
-      "Stacked PRs — position badges and a stack navigator; create, extend, or dissolve a stack from the PR view; on GitHub, merge a stack bottom-up in one go",
+      "Stacked PRs — position badges and a collapsible stack navigator; GitLab members open in separate MR tabs; create, extend, or dissolve stacks; on GitHub, merge bottom-up in one go",
+  },
+  {
+    group: "Pull requests & review",
+    label:
+      "Compact PR and MR headers with expandable details; MR title and state in the window title bar, section tabs beside actions",
+  },
+  {
+    group: "Pull requests & review",
+    label:
+      "All files toggle — browse the request's complete commit tree, with marked changed directories, unchanged files and read-only source previews",
+  },
+  {
+    group: "Pull requests & review",
+    label:
+      "GitLab MR Diff / Full file toggle — compare complete before-and-after file content with change highlights",
+  },
+  {
+    group: "Pull requests & review",
+    label:
+      "Toolbar arrows reveal changed files in the tree and navigate change blocks in partial and full-file diffs",
+  },
+  {
+    group: "Pull requests & review",
+    label:
+      "Clickable JavaScript and TypeScript imports — open relative paths, configured aliases and workspace files at the request's head and reveal them in the tree",
   },
   {
     group: "Pull requests & review",
@@ -557,9 +582,15 @@ export const capabilities: Capability[] = [
   {
     group: "Repository & workspace",
     label:
-      "My works — a GitLab home with six work categories, native Todos and complete MR details in separate app tabs",
+      "My works — a GitLab home with six work categories, native Todos and complete MR details in separate app tabs; pinned My works and Repositories navigation",
     ai: false,
     highlight: true,
+  },
+  {
+    group: "Repository & workspace",
+    label:
+      "Repositories chooser with a full-height searchable list, a compact action panel at the top right, and separate repository tabs",
+    ai: false,
   },
   {
     group: "Repository & workspace",

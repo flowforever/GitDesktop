@@ -556,6 +556,17 @@ and table row are the reference).
   both (one shared constant or prop), so a load whose probe hasn't failed
   never grows at the probe→list flip; while a probe has failed with nothing
   loaded, its retries may pin 1 row.
+- MR repository context uses the exact-commit snapshot APIs in
+  `git/pr_snapshot.rs` and `queries/pr-snapshot.ts`: the tree may fetch missing
+  objects without checkout; source bytes share its no-replacement semantics and
+  size probe. Never substitute the current index, HEAD, or an incomplete commit
+  list's last item for the MR head. Complete MR comparisons read both snapshots
+  from the forge's pinned base/head metadata; a forge patch's line counts alone
+  cannot prove its before side complete.
+- MR import links use `PrCodeImportLinks`, `usePrImportNavigation`, and
+  `pr-import-resolution`: decorate only code HTML islands or native CodeMirror
+  marks; resolve against exact snapshot paths/configuration. Deferred landings
+  check the navigation epoch, live slot and request identity after reads.
 - The diff panes swap files through a two-slot hold: `useFileSlots` +
   `FileSlots` in `src/features/diff/file-slot.tsx` is the reference
   implementation (the Changes pane and every file-rail host render it; it

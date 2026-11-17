@@ -190,7 +190,9 @@ test("a skeleton-holding title row never renders an empty heading", () => {
   const PR = "src/features/pulls/RemotePrView.tsx";
   const ISSUE = "src/features/issues/RemoteIssueViewParts.tsx";
   const anchor = 'headingAs={title === undefined ? "div" : "h2"}';
-  assert.equal(CORPUS.get(PR).split(anchor).length, 2, "the PR frame's arm");
+  const prAnchor =
+    'headingAs={titleInWindow || title === undefined ? "div" : "h2"}';
+  assert.equal(CORPUS.get(PR).split(prAnchor).length, 2, "the PR frame's arm");
   // A cached title is a heading: the frame switches to h2 the moment it has one.
   assert.equal(
     CORPUS.get(ISSUE).split(anchor).length,
@@ -199,7 +201,7 @@ test("a skeleton-holding title row never renders an empty heading", () => {
   );
   const dropped = new Map([
     ...CORPUS,
-    [PR, CORPUS.get(PR).replace(anchor, "")],
+    [PR, CORPUS.get(PR).replace(prAnchor, "")],
   ]);
   assert.equal(skeletonHeadings(dropped).problems.length, 1, "control");
 });

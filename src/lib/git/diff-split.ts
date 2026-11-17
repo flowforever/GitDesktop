@@ -77,7 +77,7 @@ function unescapeCQuoted(body: string): string {
  * name contains a space — cut at the tab rather than trimming, so a name that
  * genuinely ends in a space survives.
  */
-function newFilePath(token: string): string | undefined {
+function newFilePath(token: string, prefix = "b/"): string | undefined {
   if (!token) return undefined;
   let path: string;
   if (token.startsWith('"')) {
@@ -87,7 +87,15 @@ function newFilePath(token: string): string | undefined {
   } else {
     path = token.split("\t")[0];
   }
-  return path.startsWith("b/") ? path.slice(2) : undefined;
+  return path.startsWith(prefix) ? path.slice(2) : undefined;
+}
+
+/** The old source directory of a content-bearing section, with Git's quoting. */
+export function sectionOldFilePath(section: string): string | undefined {
+  const end = section.search(/(?<![^\n])@@ /);
+  const header = end < 0 ? section : section.slice(0, end);
+  const minus = header.match(/(?<![^\n])--- ([^\n]+)/)?.[1].replace(/\r$/, "");
+  return minus ? newFilePath(minus, "a/") : undefined;
 }
 
 /**

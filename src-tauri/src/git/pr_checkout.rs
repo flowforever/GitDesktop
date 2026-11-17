@@ -119,7 +119,7 @@ fn worktree_forge(p: Option<Provider>) -> &'static str {
 
 /// The `-c` credential entries for the fetch: a remote's through the shared funnel,
 /// a Bitbucket fork URL's through that funnel's Bitbucket arm.
-async fn fetch_credentials(repo_path: &str, from: &FetchFrom) -> AppResult<Vec<String>> {
+pub(crate) async fn fetch_credentials(repo_path: &str, from: &FetchFrom) -> AppResult<Vec<String>> {
     match from {
         FetchFrom::Remote(remote) => {
             crate::forge::credential_config_for_remote(repo_path, remote).await
@@ -657,7 +657,7 @@ pub(crate) async fn worktree_checkout_core(
 
 /// The forge's fresh source lookup. `lens` reaches only the GitHub arm, as the other
 /// forges' PR views ignore it.
-async fn checkout_source(
+pub(crate) async fn checkout_source(
     repo_path: &str,
     number: u64,
     forge: &str,

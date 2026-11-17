@@ -112,6 +112,13 @@ only when AI features are enabled{{/ai}}.
     label: "Repositories",
     body: `# Repositories
 
+Your repository list is on the left. The action panel at the top right holds
+**Open repository**, **Clone repository**, **Create repository** and other launchers.
+The list fills the remaining height and scrolls internally. In a narrow window,
+the actions follow the list. Opening a repository creates its own application tab;
+opening the same checkout again selects its existing tab. My works, Repositories
+and your MR tabs remain available as you switch between repositories.
+
 ## Switching repos
 
 The repository name in the header is a **switcher** ({{kbd:show-repositories}}). Click it
@@ -304,10 +311,17 @@ holding the MR branch. When it cannot find a checkout, choose an existing one or
 clone the project to continue. Opening a detail tab does not check out a branch.
 
 Switch tabs to keep several MRs available. The pinned **My works** tab keeps the
-home filter and scroll position. Detail tabs retain their section and selected
+home filter and scroll position. The adjacent pinned **Repositories** tab opens
+the repository chooser while keeping your MR tabs open. Detail tabs retain their section and selected
 diff, and unfinished comments remain attached to their own MR. Closing a tab
 with a draft asks for confirmation; drafts remain available during the session.
 Open detail tabs reset on restart.
+
+The repository chooser uses the full window: a searchable list on the left and
+Open, Clone, Create and navigation actions at the top right. Help and Settings
+sit beside the action panel's heading. The list scrolls within the remaining
+window height. Opening a repository creates its own tab; opening the same
+checkout again selects the existing tab.
 
 Issue links use the existing issue view when a local repository matches, otherwise
 they open on GitLab. Todo targets that are MRs use MR detail tabs; other target
@@ -1561,6 +1575,44 @@ until it lifts, and most actions that need one say so. When a token is within a 
 expiring, a quiet **dismissible notice** at the top of this tab (and the Issues tab)
 reminds you to reconnect before it lapses.
 
+The detail header starts **collapsed**. In an MR tab, the title and state appear
+in the window title bar. Conversation, Commits, Files and Review share the top
+row with Draft, Close, Merge, Checkout, Edit and the forge link. Use the caret
+before the section tabs to show or hide metadata and checks. In a repository
+tab, the request's title and state stay in its detail header.
+In **Files**, changes are grouped into a **folder tree**. Expand or collapse folders,
+use the arrow keys to navigate, and scroll horizontally to read complete file names.
+The file-scope icon at the top of the tree switches between the request's changed
+files and **All files**; hover it to see the current scope. The adjacent up/down
+arrows move between changed files, skipping unchanged source files. The tree
+expands the selected file's parents and scrolls it into view.
+Switching scope starts with folders collapsed; expanding one folder shows its
+immediate children. Select a file to read its content.
+All files reads the complete tree at the request's head commit, fetching missing
+objects without checking out a branch. Directories containing changed files,
+including their parents, are highlighted with a **Changes** marker.
+Files outside the changes have an **Unchanged**
+marker and open as read-only source; changing the scope back restores your selected diff.
+If the changes list is incomplete, the marker says **Not in loaded changes**.
+Images have a preview, binary files have a notice, and large text uses a plain source view.
+For a changed GitLab MR file, **Diff / Full file** switches between its patch and a
+complete before-and-after comparison, keeping unchanged lines and change
+highlights even when both versions are identical. A visible loading message
+tracks preparation and version reads. Finish or cancel an open line-comment draft before switching to
+Full file. Both file-scope and file-view toggles are also available from the
+command palette while Files is active. **Before / After** labels share the top
+toolbar with the view toggle. Its up/down arrows jump between change blocks in
+the file, including in Full file view. File and change navigation are also
+available from the command palette.
+
+Click a JavaScript or TypeScript **import path** in Diff, Full file or source
+preview to open its target at the request's head commit and reveal it in the tree.
+Unchanged targets switch the sidebar to **All files**. Relative imports, configured
+TypeScript or JavaScript path aliases, and workspace package entry points use
+configuration from the same snapshot. An unresolved or external import leaves the
+current file open and shows a message. Finish an open line-comment draft before
+following an import.
+
 What you can *do* here follows your access on the repository: when you lack the access an
 action needs — push access to **merge** or to flip a pull request between **draft** and
 **ready for review**, a lighter tier (GitHub's triage, GitLab's Reporter) for **labels**,
@@ -1593,7 +1645,7 @@ files with diffs, and CI checks. From there you can **comment** (with quote-repl
 **retarget** the base branch, unless the PR is stacked), manage **labels**,
 **assignees**, and **reviewers** (request a review from a collaborator — the picker
 excludes the PR author, whom GitHub won't let you request), flip a PR between
-**draft** and **ready for review** in either direction (a footer **Ready for review** /
+**draft** and **ready for review** in either direction (a header **Ready for review** /
 **Convert to draft** pair, also reachable from the command palette),
 **merge** (merge commit, squash, or rebase, with optional branch deletion), and **close**.
 The **Assignees** and **Reviewers** pickers filter as you type and list the people
@@ -2170,10 +2222,10 @@ header opens a popover to set an estimate and log spent time), and **merge**
 it — merge or squash, optionally deleting
 the source branch, guarded so it never merges a head you didn't see (GitLab applies the project's
 configured merge method, so there's no separate "rebase" option). You can also flip the MR
-between **draft** and **ready for review** in either direction — a footer **Ready for review** /
+between **draft** and **ready for review** in either direction — a header **Ready for review** /
 **Convert to draft** pair, also in the command palette. While a pipeline is running the
 merge menu also offers **auto-merge** (merge when the pipeline succeeds) — GitLab merges it for
-you once the pipeline passes, and an **Auto-merge enabled** indicator in the footer lets you cancel
+you once the pipeline passes, and an **Auto-merge enabled** indicator in the header lets you cancel
 it in place. Its **line-anchored review comments** render too — grouped by file in the
 Conversation tab and anchored in the Files diff (see *Review comments* above) — with
 reply-in-thread, resolve/unresolve, and edit/delete of your own thread comments. The MR's
@@ -2201,9 +2253,11 @@ releases work too (see their sections below).
 
 When a pull request is part of a **stack** — a chain where each PR targets the one below it
 instead of the base branch — its row in the list carries a **position badge** (*2/3*), and
-the PR view gains a **Stack** section listing every member from the bottom of the stack up,
-with the one you're reading marked. Select a member — click it, or move through the section
-with **↑ / ↓** — to open that pull request. The command palette ({{kbd:command-palette}}) also
+the PR view gains a **Stack** section. Its member list starts collapsed; use **Show**
+or **Hide** to toggle it. Members are listed from the bottom up, with the one you're
+reading marked. Select a member — click it, or move through the section with **↑ / ↓** —
+to open that pull request. GitLab members open in separate MR tabs, reusing a tab
+that's already open. The command palette ({{kbd:command-palette}}) also
 carries **Next pull request in stack** and **Previous pull request in stack**, offered from
 the pull-request view whenever there's another member in that direction; both are palette
 commands with no default shortcut, so give them one in **Settings → Keyboard** if you want

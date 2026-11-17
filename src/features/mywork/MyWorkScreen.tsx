@@ -507,7 +507,6 @@ function openRowContextMenu(url: string): void {
  */
 export function MyWorkScreen({ active = true }: { active?: boolean }) {
   const closeMyWork = useUiStore((s) => s.closeMyWork);
-  const openRepositories = useUiStore((s) => s.openRepositories);
   const openSettings = useUiStore((s) => s.openSettings);
   const openHelp = useUiStore((s) => s.openHelp);
   const category = useUiStore((s) => s.workCategory);
@@ -1004,14 +1003,11 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
           </span>
         )}
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
           className="ml-auto"
-          onClick={openRepositories}
+          onClick={openHelp}
         >
-          Repositories
-        </Button>
-        <Button variant="ghost" size="sm" onClick={openHelp}>
           Help
         </Button>
         <Button variant="ghost" size="sm" onClick={() => openSettings()}>

@@ -271,6 +271,18 @@ const REFSPEC_ALLOWLIST = [
       "validate_ref_name runs on the forge-supplied branch at fn entry, before refs/heads/<name> is built; the same validated name is the only source of the same-repo tracking refspec refs/heads/<name>:refs/remotes/<remote>/<name> (remote = a fixed lens literal); the pull/merge-request refs and the refs/gitdesktop pin are formatted from a u64 PR number (and, for the pin, the process id) only",
   },
   {
+    file: "git/pr_snapshot.rs",
+    fn: "requested_commit_present",
+    rationale:
+      "read-only for-each-ref collision probes, never refspecs; every caller supplies a full hexadecimal object ID validated by snapshot_head_sha",
+  },
+  {
+    file: "git/pr_snapshot.rs",
+    fn: "provider_head_ref",
+    rationale:
+      "the Branch arm calls validate_ref_name before refs/heads/<branch> is built; pull/MR refs use u64 request numbers and reject a source belonging to another request",
+  },
+  {
     file: "git/remote.rs",
     fn: "git_push_with_policy",
     rationale:
@@ -2868,7 +2880,9 @@ const KNOWN_NO_PATCH = new Set([
 ]);
 const knownNoPatch = (value) =>
   KNOWN_NO_PATCH.has(value) ||
-  /^(?:--(?:find-renames|diff-filter|relative|ignore-submodules)=[\s\S]*|-M\d+(?:\.\d+)?%?)$/.test(value);
+  /^(?:--(?:find-renames|diff-filter|relative|ignore-submodules)=[\s\S]*|-M\d+(?:\.\d+)?%?)$/.test(
+    value,
+  );
 const DIFF_DRIVER_FIX =
   "check K: add --no-ext-diff immediately after diff; --numstat, --name-only " +
   "and --name-status are the only exempt output modes, and only with no " +
@@ -2877,7 +2891,9 @@ const DIFF_DRIVER_FIX =
 function diffArgLiteral(text) {
   const value = literalValue(text.trim());
   if (value !== undefined) return value;
-  const owned = /^([\s\S]*)\.\s*(?:to_string|into|to_owned)\s*\(\s*\)$/.exec(text.trim());
+  const owned = /^([\s\S]*)\.\s*(?:to_string|into|to_owned)\s*\(\s*\)$/.exec(
+    text.trim(),
+  );
   const from = /^String\s*::\s*from\s*\(([\s\S]*)\)$/.exec(text.trim());
   const inner = owned?.[1] ?? from?.[1];
   return inner === undefined ? undefined : literalValue(inner.trim());
@@ -2955,10 +2971,13 @@ export function checkDiffExternalDrivers(
     const args = verb === undefined ? values : values.slice(verb + 1);
     const separator = args.indexOf("--");
     const options = separator < 0 ? args : args.slice(0, separator);
-    const pathStart = separator < 0 ? values.length : (verb === undefined ? 0 : verb + 1) + separator;
-    const enablesDriver = values.slice(0, pathStart).some(
-      (value, k) => value === "--ext-diff" && !globalValues.has(k),
-    );
+    const pathStart =
+      separator < 0
+        ? values.length
+        : (verb === undefined ? 0 : verb + 1) + separator;
+    const enablesDriver = values
+      .slice(0, pathStart)
+      .some((value, k) => value === "--ext-diff" && !globalValues.has(k));
     if (!values.includes("diff") && !enablesDriver) continue;
     const item = items.filter((i) => at > i.eq && at < i.end).at(-1);
     const fn = functions.filter((f) => at > f.open && at < f.close).at(-1);
@@ -3003,10 +3022,14 @@ export function checkDiffExternalDrivers(
         false,
       );
     } else if (values[verb] === "diff") {
-      const exempt = options.some((value) => DIFF_DRIVER_FLAGS.has(value)) &&
+      const exempt =
+        options.some((value) => DIFF_DRIVER_FLAGS.has(value)) &&
         options.every(
-          (value) => value === undefined || !value.startsWith("-") || knownNoPatch(value),
-      );
+          (value) =>
+            value === undefined ||
+            !value.startsWith("-") ||
+            knownNoPatch(value),
+        );
       if (!options.includes("--no-ext-diff") && !exempt)
         report(at, name, isItem, DIFF_DRIVER_FIX);
     }
@@ -3444,8 +3467,14 @@ const SHORT_CLUSTER_RE = /^-[A-Za-z]+$/;
 const isRefDeleteFlag = (value) =>
   value !== undefined && SHORT_CLUSTER_RE.test(value) && value.includes("d");
 // update-ref options that take no value; -m and a cluster ending in m take the next element.
-const UPDATE_REF_FLAGS = new Set(["--no-deref", "--create-reflog", "--stdin", "-z"]);
-const REF_TAIL_RE = /\.\s*(?:as_str|as_ref|clone|to_string|to_owned)\s*\(\s*\)$/;
+const UPDATE_REF_FLAGS = new Set([
+  "--no-deref",
+  "--create-reflog",
+  "--stdin",
+  "-z",
+]);
+const REF_TAIL_RE =
+  /\.\s*(?:as_str|as_ref|clone|to_string|to_owned)\s*\(\s*\)$/;
 
 /** `&x`, `x.as_str()` and their kin name the same ref as `x`. */
 function deleteRefText(text) {
@@ -3490,7 +3519,10 @@ function spelledRefFix(ref, noDeref) {
   }
   // A method chained onto format!(…) beyond the stripped tails can rewrite it.
   const open = /^format\s*!\s*[([{]/.exec(ref)?.[0].length;
-  if (open !== undefined && open + bracketBody(ref, open - 1).length + 1 !== ref.length)
+  if (
+    open !== undefined &&
+    open + bracketBody(ref, open - 1).length + 1 !== ref.length
+  )
     return OPAQUE_DELETE_REF_FIX;
   const template = formatTemplate(ref);
   if (template === undefined) return undefined;
@@ -3603,7 +3635,11 @@ export function checkLocalBranchDeletes(
     if (values[verb] === "branch") {
       if (branchFlag) report(at, name, LOCAL_BRANCH_DELETE_FIX);
     } else if (values[verb] === "update-ref" && refDelete) {
-      if (corpus && file === "git/branches.rs" && name === "delete_branch_ref_at")
+      if (
+        corpus &&
+        file === "git/branches.rs" &&
+        name === "delete_branch_ref_at"
+      )
         corpus.primitive = true;
       const { ref, noDeref } = updateRefOperand(
         elements.slice(verb + 1),
