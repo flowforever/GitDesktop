@@ -75,6 +75,10 @@ export async function initAnalytics(
     mask_all_element_attributes: true,
     capture_pageview: false,
     capture_pageleave: false,
+    // Keep errors and console output local, including when replay is enabled
+    // or the PostHog project enables exception capture remotely.
+    capture_exceptions: false,
+    enable_recording_console_log: false,
     // No network/perf capture at all (payloads are off by default; this also
     // drops timing) so request URLs/bodies never reach a recording.
     capture_performance: false,

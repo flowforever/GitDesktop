@@ -9,7 +9,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorDialog } from "@/features/errors/ErrorDialog";
-import { initAnalytics, trackCaughtError } from "@/lib/analytics";
+import { initAnalytics } from "@/lib/analytics";
 import { calmTransition } from "@/lib/motion";
 import { queryClient } from "@/lib/query-client";
 import { loadSettings } from "@/lib/settings/api";
@@ -46,16 +46,6 @@ loadSettings()
   .catch(() => {
     // Analytics is best-effort — never surface its failures.
   });
-
-// Wire up unhandled errors to PostHog after the page loads. trackCaughtError
-// dedupes by identity, so errors already reported by an ErrorBoundary (fatal)
-// aren't re-counted here as non-fatal.
-window.addEventListener("error", (e) => {
-  trackCaughtError(e.error ?? e.message, false);
-});
-window.addEventListener("unhandledrejection", (e) => {
-  trackCaughtError(e.reason, false);
-});
 
 // Beyond position and closeButton, only theme and the offset props ride along:
 // the wrapper spreads caller props last, so toastOptions would drop its cn-toast

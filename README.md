@@ -1683,8 +1683,8 @@ your daily workflow, you can support continued development:
 
 GitDesktop never collects your code, file contents, or repository details.
 Optional anonymous usage analytics can be turned off in Settings → General,
-and masked session replay stays off until you opt in. Full details:
-[PRIVACY.md](PRIVACY.md).
+and masked session replay stays off until you opt in. Error reports and console
+output are excluded from PostHog. Full details: [PRIVACY.md](PRIVACY.md).
 
 ## License
 

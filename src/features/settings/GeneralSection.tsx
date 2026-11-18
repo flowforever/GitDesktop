@@ -183,8 +183,8 @@ export const GeneralSection = withForm({
           </form.AppField>
           <p className="text-xs text-muted-foreground">
             Sends anonymous, content-free usage events to PostHog (EU region) to
-            help improve the app. No code, file names, repo paths, or secrets
-            are ever captured. Takes effect after saving.
+            help improve the app. Error reports and console output are excluded.
+            Takes effect after saving.
           </p>
         </div>
         <div className="space-y-1.5">

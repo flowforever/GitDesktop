@@ -730,6 +730,11 @@ export const capabilities: Capability[] = [
   },
 
   // — Admin & settings —
+  {
+    group: "Admin & settings",
+    label:
+      "Anonymous usage analytics with opt-in masked replay; error reports and console output excluded",
+  },
   { group: "Admin & settings", label: "Repo settings & webhooks (admin)" },
   { group: "Admin & settings", label: "Collaborators & invitations (admin)" },
   {

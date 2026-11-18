@@ -6,7 +6,7 @@ description: "The limited, anonymous data GitDesktop collects, what the gitdeskt
 
 # Privacy Policy
 
-_Last updated: 2026-07-25_
+_Last updated: 2026-11-19_
 
 GitDesktop is a desktop Git client. This policy explains the limited, anonymous
 data it collects to improve the app, the third-party services your activity can
@@ -29,8 +29,6 @@ When usage analytics is enabled (see Your choices and rights), we collect:
 - **Anonymous usage events** — content-free signals such as which screen you
   viewed, that a commit or pull request was created (counts and booleans only,
   no text), and which features were used.
-- **Crash / error reports** — the error type and a scrubbed, length-capped
-  message, with absolute paths and secret-shaped strings redacted.
 - **A random device identifier** — a UUID generated on your device. It is not
   linked to your name, email, GitHub account, or any personal identifier.
 - **Technical metadata** added by our processor, including your **IP address**
@@ -44,7 +42,8 @@ diff viewer, file content, blame view, AI review output, and text editors are
 never reveal the content you are working on.
 
 We do **not** build user profiles and do **not** capture network request
-contents.
+contents. Error reports and console output are excluded from PostHog, including
+session recordings. Errors are displayed locally in the app.
 
 ## How we use it and our legal basis
 
@@ -65,14 +64,15 @@ their own privacy policies, not ours:
 
 - **GitHub.** All GitHub features (pull requests, issues, Actions, releases, and
   so on) run through the GitHub CLI (`gh`) using your own GitHub authentication;
-  the corresponding API requests, and your IP address, reach GitHub. Update
-  checks and downloads are fetched from GitHub Releases.
+  the corresponding API requests, and your IP address, reach GitHub. Downloads
+  are fetched from GitHub Releases.
 - **AI providers (only if you enable AI features).** When you use an AI feature,
   GitDesktop sends the context needed for that action, for example a diff or an
   issue's text, to the AI provider you have configured (such as Anthropic,
-  OpenAI, or OpenRouter). With a local **Ollama** model or the local **Claude
-  Code / Codex CLI** agents, this stays on your machine. We never receive or
-  store this content; it is governed by your chosen provider's terms.
+  OpenAI, or OpenRouter). With a local **Ollama** model, inference stays on your
+  machine. **CLI agents** use their own account and provider configuration and
+  can send prompts, code and tool results to cloud providers. We never receive
+  or store this content; it is governed by your chosen provider's terms.
 
 ## The gitdesktop.app website
 

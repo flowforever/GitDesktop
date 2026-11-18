@@ -1,5 +1,4 @@
 import { posthog } from "./posthog";
-import { scrubError } from "./scrub-error";
 
 // ---------------------------------------------------------------------------
 // Event schema — only these events and properties are ever sent.
@@ -33,10 +32,6 @@ export type AnalyticsEvent =
   | {
       name: "ai_review_triggered";
       properties: { provider: string; model_tier: string };
-    }
-  | {
-      name: "error_caught";
-      properties: { error_kind: string; fatal: boolean; message: string };
     };
 
 export function track(event: AnalyticsEvent): void {
@@ -47,27 +42,4 @@ export function track(event: AnalyticsEvent): void {
   } catch {
     // Never let analytics break the app.
   }
-}
-
-// Errors already reported, tracked by object identity, so a React error
-// boundary and the global window error/unhandledrejection handlers don't
-// double-count the same failure (React re-dispatches boundary-caught errors to
-// window.onerror). WeakSet so reported errors can still be garbage-collected.
-const reportedErrors = new WeakSet<object>();
-
-/**
- * Report a caught/uncaught error to analytics exactly once. The first report
- * for a given error object wins — the boundary (fatal: true) runs before the
- * re-dispatched window event (fatal: false), so the accurate one is kept.
- */
-export function trackCaughtError(error: unknown, fatal: boolean): void {
-  if (typeof error === "object" && error !== null) {
-    if (reportedErrors.has(error)) return;
-    reportedErrors.add(error);
-  }
-  const { message, kind } = scrubError(error);
-  track({
-    name: "error_caught",
-    properties: { error_kind: kind, fatal, message },
-  });
 }

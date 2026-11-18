@@ -4473,9 +4473,12 @@ Sections:
   overridable per PR; pairs with *Review draft PRs when created* so a draft's automated
   first review waits until it's marked ready), **fetch link previews** (the title,
   description, and image behind a link in a rendered body; off leaves the card showing
-  the destination alone), and privacy options. If changes made offline are still waiting
-  to send, quitting from the tray or closing the window with the tray option off asks
-  before discarding them.
+  the destination alone), and privacy options. **Send anonymous usage data** controls
+  PostHog usage events; **Allow masked session recordings** stays off until you opt in.
+  Error reports and console output are excluded from both. Errors still appear locally,
+  with **Try again** and **Reload** available if a view crashes. If changes made offline
+  are still waiting to send, quitting from the tray or closing the window with the tray
+  option off asks before discarding them.
 - **Appearance** — pick a theme: **System** (follows your OS's light/dark setting),
   **Light**, **Dark**, or **Slate** (a softer, blue-gray dark). Applies as you pick it,
   and *Cycle theme* in the command palette steps through them. **Interface zoom**
