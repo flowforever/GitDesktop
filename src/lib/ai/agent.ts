@@ -371,6 +371,16 @@ export interface AgentSessionArgs {
 export async function runAgentSession(
   args: AgentSessionArgs,
 ): Promise<ReviewEvent | null> {
+  if (
+    args.agent === "codex" &&
+    args.resume &&
+    args.isolation !== "container" &&
+    !args.nativeSessionId?.trim()
+  ) {
+    throw new Error(
+      "This Codex conversation has no saved session ID. Start a new conversation to continue.",
+    );
+  }
   const { channel, gate } = gatedChannel(args.onEvent);
   const returned = await invoke<ReviewEvent | null>("agent_session", {
     agent: args.agent,

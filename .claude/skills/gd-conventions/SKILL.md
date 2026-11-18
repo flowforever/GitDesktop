@@ -1461,6 +1461,11 @@ one grep away on the named symbol. Grows via Conventions-sync.
   model/effort with `agentDefaultsFor(settings, harness)`. An untouched composer
   follows these per-harness defaults; an explicit empty pick uses the CLI's own
   default. Existing conversations retain their stored values.
+- **Host Codex resumes require a native ID** at `runAgentSession`; `--last` can
+  attach an unrelated conversation in the shared CLI home. Only read-only MR
+  chat rebuilds missing sessions from saved messages: one exact missing-thread
+  failure before output, after transport settlement, with fresh filtered context.
+  Plan/Research and write sessions keep their own recovery paths.
 - **Per-record repo scope** — a record offered per-repo-or-globally carries a
   `scope` string: the `"global"` sentinel (also the absent-value default) or
   an identity key. Reads match BOTH key forms (raw + identity, most-preferred

@@ -476,7 +476,9 @@ in one click.
   **New chat** starts a separate conversation. The read-only chat stays with
   the request as you switch sections. Collapse it to a narrow strip or drag
   its left boundary to adjust its width; drafts, attachments and running chats
-  are retained. AI-excluded files stay out of context.
+  are retained. If Codex cannot find its saved session, the chat recovers from
+  recent saved messages and fresh MR context. Earlier code attachments and tool
+  output need to be supplied again. AI-excluded files stay out of context.
 - **Follow imports while reviewing**: click an import, module or include path
   in a diff or source preview to open its file at the request's head and reveal
   it in the tree. Supports JavaScript/TypeScript, Python, Go, Rust, Java/Kotlin,

@@ -1,0 +1,1 @@
+- Recover MR chats when Codex can no longer find the saved session, using recent messages and refreshed MR context. Prevent host Codex conversations without a saved ID from resuming an unrelated thread.

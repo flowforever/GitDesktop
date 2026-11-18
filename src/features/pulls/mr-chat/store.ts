@@ -94,6 +94,17 @@ const SYSTEM = [
   "The latest context block supersedes earlier MR metadata or diffs. Keep the answer concise and use the user's language. If context is missing or truncated, say what you could not verify.",
 ].join(" ");
 
+function missingCodexThread(
+  message: string,
+  expectedId: string | null,
+): boolean {
+  if (!expectedId || !message.includes("thread/resume")) return false;
+  const missing = message.match(
+    /no rollout found for thread id ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=[\s(]|$)/i,
+  );
+  return missing?.[1] === expectedId;
+}
+
 export const useMrChatStore = create<MrChatState>((set, get) => {
   let hydrating: Promise<void> | null = null;
   const flights = new Map<
@@ -101,6 +112,7 @@ export const useMrChatStore = create<MrChatState>((set, get) => {
     {
       index: number;
       launched: boolean;
+      terminalSeen: boolean;
       cancelled: boolean;
       cancelSignal: Promise<void> | null;
       cancelError: string | null;
@@ -128,6 +140,7 @@ export const useMrChatStore = create<MrChatState>((set, get) => {
     const flight = {
       index,
       launched: false,
+      terminalSeen: false,
       cancelled: false,
       cancelSignal: null as Promise<void> | null,
       cancelError: null as string | null,
@@ -155,14 +168,26 @@ export const useMrChatStore = create<MrChatState>((set, get) => {
         ),
       }));
     };
-    try {
+    const history = initial.turns.slice(0, index);
+    let nativeId = initial.nativeSessionId?.trim() || null;
+    let resumeAttempt =
+      resume &&
+      (initial.agent === "codex"
+        ? nativeId !== null
+        : nativeId !== null ||
+          history.some(
+            (entry) => entry.status === "done" || entry.narration.length > 0,
+          ));
+    let restoreHistory =
+      initial.agent === "codex" && !nativeId && history.length > 0;
+    const prepareContext = async () => {
       const [settings, diff] = await Promise.all([
         loadSettings(),
         context.diff === undefined && context.loadDiff
           ? context.loadDiff()
           : Promise.resolve(context.diff),
       ]);
-      if (!current()) return;
+      if (!current()) return null;
       const exclude = await aiExcludePatterns(
         context.repoPath,
         settings.aiIgnorePatterns,
@@ -182,98 +207,152 @@ export const useMrChatStore = create<MrChatState>((set, get) => {
         throw new Error(
           "An attachment is excluded from AI context. Remove it before sending again.",
         );
-      if (!current()) return;
-      const prepared = {
+      if (!current()) return null;
+      return {
         ...context,
         diff: diff === undefined ? undefined : filtered.text,
         files: filtered.files,
         excludedFiles: filtered.excludedFiles + filtered.unkeyableSections,
       };
-      patchTurn({ statusText: "Starting the agent…" });
-      flight.launched = true;
-      await runAgentSession({
-        agent: initial.agent,
-        binPath: null,
-        model: initial.model,
-        effort: initial.effort,
-        systemPrompt: SYSTEM,
-        userPrompt: buildMrChatPrompt(prepared, message, attachments),
-        worktreePath: initial.repoPath,
-        sessionId: initial.id,
-        resume:
-          resume &&
-          (initial.nativeSessionId !== null ||
-            initial.turns
-              .slice(0, index)
-              .some(
-                (entry) =>
-                  entry.status === "done" || entry.narration.length > 0,
-              )),
-        readOnly: true,
-        isolation: "worktree",
-        nativeSessionId: initial.nativeSessionId,
-        onEvent: (event) => {
-          const session = current();
-          if (!session) return;
-          const active = session.turns[index];
-          switch (event.kind) {
-            case "nativeSession":
-              patch(id, (entry) => ({
-                ...entry,
-                nativeSessionId: entry.nativeSessionId ?? event.id,
-              }));
-              break;
-            case "delta":
-              patchTurn({
-                narration: active.narration + event.text,
-                segments: appendTranscriptText(
-                  active.segments ?? [],
-                  event.text,
-                ),
-                statusText: "",
-              });
-              break;
-            case "tool":
-              patchTurn({
-                segments: appendTranscriptTool(
-                  active.segments ?? [],
-                  event.tool,
-                  event.target,
-                ),
-                statusText: "",
-              });
-              break;
-            case "status":
-              patchTurn({ statusText: event.text });
-              break;
-            case "done": {
-              const text = event.isError
-                ? active.narration
-                : event.text || active.narration;
-              patchTurn({
-                status: event.isError ? "error" : "done",
-                narration: text,
-                segments: ensureTranscriptText(active.segments ?? [], text),
-                costUsd: event.costUsd,
-                error: event.isError ? terminalErrorMessage(event.text) : null,
-                statusText: "",
-              });
-              break;
-            }
-            case "error": {
-              const text = event.partialText || active.narration;
-              patchTurn({
-                status: "error",
-                error: event.message,
-                narration: text,
-                segments: ensureTranscriptText(active.segments ?? [], text),
-                statusText: "",
-              });
-              break;
-            }
-          }
-        },
-      });
+    };
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const prepared = await prepareContext();
+        if (!prepared || !current()) return;
+        patchTurn({
+          statusText: restoreHistory
+            ? "Restoring saved MR messages…"
+            : "Starting the agent…",
+        });
+        let accepting = true;
+        let hadOutput = false;
+        let missingThread = false;
+        const canRestore = (message: string) =>
+          attempt === 0 &&
+          initial.agent === "codex" &&
+          resumeAttempt &&
+          !hadOutput &&
+          missingCodexThread(message, nativeId);
+        flight.launched = true;
+        flight.terminalSeen = false;
+        try {
+          await runAgentSession({
+            agent: initial.agent,
+            binPath: null,
+            model: initial.model,
+            effort: initial.effort,
+            systemPrompt: SYSTEM,
+            userPrompt: buildMrChatPrompt(
+              prepared,
+              message,
+              attachments,
+              restoreHistory ? history : [],
+            ),
+            worktreePath: initial.repoPath,
+            sessionId: initial.id,
+            resume: resumeAttempt,
+            readOnly: true,
+            isolation: "worktree",
+            nativeSessionId: nativeId,
+            onEvent: (event) => {
+              const session = current();
+              if (!accepting || !session) return;
+              const failure =
+                event.kind === "error"
+                  ? !event.timedOut && !event.partialText
+                    ? event.message
+                    : null
+                  : event.kind === "done" && event.isError
+                    ? event.text
+                    : null;
+              if (failure && canRestore(failure)) {
+                missingThread = true;
+                accepting = false;
+                flight.terminalSeen = true;
+                patchTurn({ statusText: "Restoring saved MR messages…" });
+                return;
+              }
+              if (
+                event.kind === "tool" ||
+                (event.kind === "delta" && event.text)
+              )
+                hadOutput = true;
+              const active = session.turns[index];
+              switch (event.kind) {
+                case "nativeSession":
+                  patch(id, (entry) => ({
+                    ...entry,
+                    nativeSessionId: entry.nativeSessionId?.trim() || event.id,
+                  }));
+                  break;
+                case "delta":
+                  patchTurn({
+                    narration: active.narration + event.text,
+                    segments: appendTranscriptText(
+                      active.segments ?? [],
+                      event.text,
+                    ),
+                    statusText: "",
+                  });
+                  break;
+                case "tool":
+                  patchTurn({
+                    segments: appendTranscriptTool(
+                      active.segments ?? [],
+                      event.tool,
+                      event.target,
+                    ),
+                    statusText: "",
+                  });
+                  break;
+                case "status":
+                  patchTurn({ statusText: event.text });
+                  break;
+                case "done": {
+                  const text = event.isError
+                    ? active.narration
+                    : event.text || active.narration;
+                  patchTurn({
+                    status: event.isError ? "error" : "done",
+                    narration: text,
+                    segments: ensureTranscriptText(active.segments ?? [], text),
+                    costUsd: event.costUsd,
+                    error: event.isError
+                      ? terminalErrorMessage(event.text)
+                      : null,
+                    statusText: "",
+                  });
+                  break;
+                }
+                case "error": {
+                  const text = event.partialText || active.narration;
+                  patchTurn({
+                    status: "error",
+                    error: event.message,
+                    narration: text,
+                    segments: ensureTranscriptText(active.segments ?? [], text),
+                    statusText: "",
+                  });
+                  break;
+                }
+              }
+            },
+          });
+        } catch (error) {
+          if (!canRestore(errorMessage(error))) throw error;
+          missingThread = true;
+        } finally {
+          accepting = false;
+          flight.launched = false;
+        }
+        if (!missingThread || !current()) break;
+        // Retire the unavailable thread only after its transport has settled.
+        // A fresh attempt must capture its own id, never resume Codex's --last.
+        patch(id, (session) => ({ ...session, nativeSessionId: null }));
+        nativeId = null;
+        resumeAttempt = false;
+        restoreHistory = true;
+      }
       if (current())
         patchTurn({
           status: "error",
@@ -427,6 +506,8 @@ export const useMrChatStore = create<MrChatState>((set, get) => {
           at === index ? { ...item, statusText: "Stopping…" } : item,
         ),
       }));
+      // A terminal can arrive after backend unregister but before IPC settles.
+      if (flight.terminalSeen) return;
       flight.cancelSignal = (async () => {
         try {
           await cancelAgentSession(id);

@@ -1654,6 +1654,11 @@ it back. Drag the chat's left boundary to resize it, or focus that separator and
 use the arrow keys. Your width, draft, attachments and running conversation are
 preserved when you collapse or expand the pane.
 
+If Codex can no longer find its local session, MR chat restores recent saved
+messages and refreshes the request context in a new CLI session. Older history
+may be truncated; previous code attachments and tool output are not restored.
+Attach any code you still need before continuing.
+
 Use **Attach current file** for the version you are viewing, or select code in a
 rendered diff or ordinary source view and choose **Attach selected code**. Attachment
 chips can be previewed and removed before sending. Large-source CodeMirror views

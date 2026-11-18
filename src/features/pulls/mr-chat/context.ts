@@ -76,10 +76,43 @@ function bounded(text: string, limit: number): string {
     : text;
 }
 
+interface PriorMessage {
+  prompt: string;
+  narration: string;
+  status: string;
+}
+
+function restoredMessages(history: PriorMessage[]): string {
+  const messages: string[] = [];
+  let size = 0;
+  for (const turn of history.toReversed()) {
+    const message = JSON.stringify({
+      user: bounded(turn.prompt, 12_000),
+      assistant: bounded(turn.narration, 20_000),
+      status: turn.status,
+    });
+    if (size + message.length > 60_000) break;
+    messages.unshift(message);
+    size += message.length;
+  }
+  return [
+    "<restored-conversation>",
+    "The CLI's previous session is unavailable. Continue this MR discussion using the saved messages below and the current MR context above. Earlier code attachments and tool output are not restored.",
+    history.length > messages.length
+      ? `[History truncated: ${history.length - messages.length} older turns omitted.]`
+      : "",
+    `[${messages.join(",\n")}]`,
+    "</restored-conversation>",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function buildMrChatPrompt(
   context: MrChatContext,
   message: string,
   attachments: MrChatAttachment[],
+  history: PriorMessage[] = [],
 ): string {
   const files = context.files.map((file) => file.path).join("\n");
   const parts = [
@@ -111,6 +144,7 @@ export function buildMrChatPrompt(
       "</attached-code>",
     );
   }
+  if (history.length) parts.push(restoredMessages(history));
   parts.push(`<user-message>\n${message}\n</user-message>`);
   return parts.filter(Boolean).join("\n\n");
 }

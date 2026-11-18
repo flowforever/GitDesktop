@@ -357,7 +357,7 @@ export const capabilities: Capability[] = [
     group: "AI · agents & sessions",
     ai: true,
     label:
-      "Collapsible, resizable MR chat — choose a CLI, include request context, attach pinned files or selected code, and list only this request's ongoing sessions",
+      "Collapsible, resizable MR chat — choose a CLI, attach files or selected code, list this request's ongoing sessions, and recover missing Codex sessions from saved messages",
   },
   {
     group: "Pull requests & review",
