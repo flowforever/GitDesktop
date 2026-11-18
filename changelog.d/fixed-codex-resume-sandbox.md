@@ -1,0 +1,1 @@
+- Fix Codex follow-up messages failing with `unexpected argument '-s'` by applying sandbox options before the resume subcommand.

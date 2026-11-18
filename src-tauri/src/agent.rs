@@ -1898,16 +1898,7 @@ fn codex_session_args(
     web: bool,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec!["exec".into()];
-    if resume {
-        args.push("resume".into());
-        // A container session has a dedicated home, so `--last` is unambiguous. A
-        // host session shares `~/.codex`, so resume the *specific* thread captured
-        // from turn 1 — `--last` could grab a concurrent session.
-        match (container, thread_id) {
-            (false, Some(id)) => args.push(id.into()),
-            _ => args.push("--last".into()),
-        }
-    }
+    // Sandbox selection belongs to `exec`; `exec resume` does not accept `-s`.
     if read_only {
         // A Plan / Research conversation: the read-only sandbox denies every write
         // (the hard guarantee). Never the container full-bypass, which would allow writes.
@@ -1939,6 +1930,16 @@ fn codex_session_args(
             // silently degrades to read-only on Windows.
             args.push("-c".into());
             args.push("windows.sandbox=\"unelevated\"".into());
+        }
+    }
+    if resume {
+        args.push("resume".into());
+        // A container session has a dedicated home, so `--last` is unambiguous. A
+        // host session shares `~/.codex`, so resume the *specific* thread captured
+        // from turn 1 — `--last` could grab a concurrent session.
+        match (container, thread_id) {
+            (false, Some(id)) => args.push(id.into()),
+            _ => args.push("--last".into()),
         }
     }
     if web {
@@ -7488,6 +7489,89 @@ opencode/x-preview-f-free
     fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         let i = args.iter().position(|a| a == flag)?;
         args.get(i + 1).map(String::as_str)
+    }
+
+    #[test]
+    fn codex_resume_places_sandbox_policy_before_the_subcommand() {
+        for container in [false, true] {
+            for read_only in [false, true] {
+                let args = codex_session_args(
+                    "test-model",
+                    true,
+                    container,
+                    Some("thread-for-this-chat"),
+                    "high",
+                    read_only,
+                    true,
+                );
+                let at = args.iter().position(|arg| arg == "resume").expect("resume");
+                let (exec, resumed) = args.split_at(at);
+                let expected_policy = if read_only {
+                    "read-only"
+                } else {
+                    "workspace-write"
+                };
+                if read_only || !container {
+                    assert_eq!(flag_value(exec, "-s"), Some(expected_policy), "{args:?}");
+                    assert!(!args
+                        .iter()
+                        .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+                } else {
+                    assert!(
+                        exec.iter()
+                            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"),
+                        "{args:?}"
+                    );
+                }
+                assert!(
+                    !resumed.iter().any(|arg| arg == "-s" || arg == "--sandbox"),
+                    "{args:?}"
+                );
+                assert_eq!(
+                    resumed[1],
+                    if container {
+                        "--last"
+                    } else {
+                        "thread-for-this-chat"
+                    }
+                );
+                assert_eq!(args.last().map(String::as_str), Some("-"));
+                assert!(args.iter().any(|arg| arg == "--json"));
+                assert!(args.iter().any(|arg| arg == "--skip-git-repo-check"));
+                assert_eq!(flag_value(&args, "-m"), Some("test-model"));
+                assert!(args
+                    .windows(2)
+                    .any(|pair| pair == ["-c", "model_reasoning_effort=\"high\""]));
+                assert!(args
+                    .windows(2)
+                    .any(|pair| pair == ["-c", "web_search=\"live\""]));
+            }
+        }
+    }
+
+    #[test]
+    fn codex_initial_turn_preserves_its_sandbox_and_stdin() {
+        for container in [false, true] {
+            for read_only in [false, true] {
+                let args = codex_session_args("", false, container, None, "", read_only, false);
+                assert_eq!(args.first().map(String::as_str), Some("exec"));
+                assert_eq!(args.last().map(String::as_str), Some("-"));
+                assert!(!args.iter().any(|arg| arg == "resume" || arg == "--last"));
+                if read_only {
+                    assert_eq!(flag_value(&args, "-s"), Some("read-only"));
+                    assert!(!args
+                        .iter()
+                        .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+                } else if container {
+                    assert!(args
+                        .iter()
+                        .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+                    assert!(flag_value(&args, "-s").is_none());
+                } else {
+                    assert_eq!(flag_value(&args, "-s"), Some("workspace-write"));
+                }
+            }
+        }
     }
 
     #[test]

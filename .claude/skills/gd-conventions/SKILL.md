@@ -1582,6 +1582,9 @@ one grep away on the named symbol. Grows via Conventions-sync.
   values either side. Third-party timestamps validate before formatting —
   `parseableDate` for ISO strings, `validEpochMs` for epoch numbers
   (`src/lib/time.ts`); never raw `new Date(x)` on forge/CLI data.
+- Codex session sandbox flags belong before the `resume` subcommand
+  (`codex exec -s read-only resume <thread> ...`). Keep the same sandbox on
+  follow-up turns and verify argument hierarchy against the installed CLI help.
 - **Windows spawning:** never pass multi-line argv to `.cmd` shims
   (BatBadBut rejection) — feed multi-line input via stdin. Generated launcher
   scripts build through `agent_sandbox`'s `cmd_script_quoted`/`cmd_script_arg`
