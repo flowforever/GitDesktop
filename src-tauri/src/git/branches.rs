@@ -8513,6 +8513,10 @@ mod tests {
         let sentinel = base_dir.join("hook-fired");
         let hook = repo.join(".git").join("hooks").join("pre-merge-commit");
         std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        // Pin this fixture's hook directory instead of inheriting the host's
+        // core.hooksPath; linked worktrees resolve this absolute common path too.
+        let hooks = hook.parent().unwrap().to_string_lossy().replace('\\', "/");
+        run(&repo_s, &["config", "--local", "core.hooksPath", &hooks]).await;
         std::fs::write(
             &hook,
             format!(
@@ -14475,12 +14479,14 @@ mod tests {
         let _held = acquire_repo_lock(&network, NETWORK_LOCK_WAIT_TIMEOUT, "a fetch")
             .await
             .unwrap();
+        // The held lock and exact Git error prove ordering; a short wall-clock
+        // budget also measures unrelated subprocess contention in the full suite.
         let err = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
+            TEST_GIT_HANG_GUARD,
             update_branch_from(&state, &f.repo, "local", "incoming", &HashSet::new(), None),
         )
         .await
-        .expect("git's own refusal must precede the network wait")
+        .expect("git's own refusal must complete within the hang guard")
         .unwrap_err();
         let AppError::Git { code, stderr } = err else {
             panic!("{err:?}")
