@@ -204,6 +204,7 @@ const LOCAL_CALLEES = [
 /** Network writes named individually: git commands that fetch, push or run a
  *  networked tool, and anything a local family would otherwise claim. */
 const NETWORK_CALLEES = [
+  "gitlabWatchMergeRequest",
   "gitlabWorkTodoDone",
   "gitFetch",
   "gitFetchRemote",
@@ -291,7 +292,11 @@ const SEQUENTIAL_COMPOUND = [
   {
     file: "src/lib/git/queries/sync.ts",
     hook: "useUpdateFromUpstream",
-    callees: ["api.gitFetchRemote", "api.gitRemoteDefaultBranch", "api.gitMerge"],
+    callees: [
+      "api.gitFetchRemote",
+      "api.gitRemoteDefaultBranch",
+      "api.gitMerge",
+    ],
     reason:
       "the fetch feeds the merge sequentially (merge needs the fetched upstream ref); the default online mode parks the whole operation offline, which is right — neither arm should run without a connection",
   },
@@ -1212,8 +1217,7 @@ function scanSource(source, file) {
       mode,
     };
     sites.push(record);
-    if (verdict.mixed)
-      offenders.push({ ...record, why: MIXED_WRITE_REASON });
+    if (verdict.mixed) offenders.push({ ...record, why: MIXED_WRITE_REASON });
     if (verdict.cls === "local" && mode !== "always")
       offenders.push({
         ...record,
@@ -1277,10 +1281,13 @@ function hookClasses(sites, sources = []) {
     const hooks = fns.filter((f) => /^use[A-Z]/.test(f.name ?? ""));
     const edges = hooks.map((hook) => ({
       hook,
-      calls: [...masked.slice(hook.bodyOpen + 1, hook.bodyClose).matchAll(CALL_RE)]
-        .filter((m) =>
-          !m[0].startsWith("api.") &&
-          enclosingFn(fns, hook.bodyOpen + 1 + m.index) === hook,
+      calls: [
+        ...masked.slice(hook.bodyOpen + 1, hook.bodyClose).matchAll(CALL_RE),
+      ]
+        .filter(
+          (m) =>
+            !m[0].startsWith("api.") &&
+            enclosingFn(fns, hook.bodyOpen + 1 + m.index) === hook,
         )
         .map((m) => m[1]),
     }));
@@ -1293,7 +1300,8 @@ function hookClasses(sites, sources = []) {
             if (add(local, hook.name, cls)) changed = true;
     } while (changed);
     for (const hook of hooks)
-      for (const cls of local.get(hook.name) ?? []) add(classes, hook.name, cls);
+      for (const cls of local.get(hook.name) ?? [])
+        add(classes, hook.name, cls);
   }
   return classes;
 }
@@ -1342,7 +1350,10 @@ test("a direct mixed mutationFn fails unless its sequential compound is recorded
   const r = scan(source);
   assert.deepEqual(r.ambiguities, []);
   assert.equal(r.sites[0].cls, "network");
-  assert.deepEqual(r.offenders.map((f) => f.why), [MIXED_WRITE_REASON]);
+  assert.deepEqual(
+    r.offenders.map((f) => f.why),
+    [MIXED_WRITE_REASON],
+  );
   const exempt = [
     {
       file: "src/fixture.ts",
@@ -1361,30 +1372,47 @@ test("a direct mixed mutationFn fails unless its sequential compound is recorded
     "function useMixed() { return useMutation({ mutationFn: () => api.gitPush(r) }); }",
   ]) {
     const clean = scan(source);
-    assert.deepEqual(applyExemptions(clean.offenders, [], exempt).stale, exempt);
+    assert.deepEqual(
+      applyExemptions(clean.offenders, [], exempt).stale,
+      exempt,
+    );
   }
   const otherHook = scan(source.replaceAll("useMixed", "useOther"));
-  assert.equal(applyExemptions(otherHook.offenders, [], exempt).failures.length, 1);
+  assert.equal(
+    applyExemptions(otherHook.offenders, [], exempt).failures.length,
+    1,
+  );
   const otherFile = scan(source, "src/other.ts");
-  assert.equal(applyExemptions(otherFile.offenders, [], exempt).failures.length, 1);
+  assert.equal(
+    applyExemptions(otherFile.offenders, [], exempt).failures.length,
+    1,
+  );
   const always = scan(
     source.replace("mutationFn:", 'networkMode: "always", mutationFn:'),
   );
-  assert.equal(applyExemptions(always.offenders, [], exempt).failures.length, 1);
+  assert.equal(
+    applyExemptions(always.offenders, [], exempt).failures.length,
+    1,
+  );
   const passed = scan(
     "function useW(fn) { return useMutation({ mutationFn: fn }); } useW(() => remote ? api.gitPush(r) : api.gitStage(r));",
   );
   assert.match(passed.ambiguities[0].why, /mix local and network/);
-  const two = scan(source.replace(
-    "return useMutation",
-    "useMutation({ mutationFn: () => remote ? api.gitPush(r) : api.gitCommit(r) }); return useMutation",
-  ));
+  const two = scan(
+    source.replace(
+      "return useMutation",
+      "useMutation({ mutationFn: () => remote ? api.gitPush(r) : api.gitCommit(r) }); return useMutation",
+    ),
+  );
   const remaining = applyExemptions(two.offenders, [], exempt);
   assert.deepEqual(remaining.stale, []);
   assert.equal(remaining.failures.length, 1);
   assert.ok(remaining.failures[0].callees.includes("api.gitCommit"));
   const changed = scan(source.replace("api.gitStage", "api.gitCommit"));
-  assert.deepEqual(applyExemptions(changed.offenders, [], exempt).stale, exempt);
+  assert.deepEqual(
+    applyExemptions(changed.offenders, [], exempt).stale,
+    exempt,
+  );
 });
 
 test("offline vocabulary follows same-file factory callers to a fixpoint", () => {
@@ -1414,14 +1442,26 @@ test("offline vocabulary follows same-file factory callers to a fixpoint", () =>
     },
   ];
   const verdicts = sources.map(({ file, source }) => scan(source, file));
-  assert.deepEqual(verdicts.flatMap((v) => v.ambiguities), []);
-  const classes = hookClasses(verdicts.flatMap((v) => v.sites), sources);
+  assert.deepEqual(
+    verdicts.flatMap((v) => v.ambiguities),
+    [],
+  );
+  const classes = hookClasses(
+    verdicts.flatMap((v) => v.sites),
+    sources,
+  );
   for (const hook of ["useCloseIssue", "useOuter"]) {
     assert.deepEqual([...classes.get(hook)], ["network"]);
-    const found = offlineVocabularyFindings([{
-      file: "src/features/fixture.tsx",
-      source: `const close = ${hook}(r, lens); close.mutate(v);`,
-    }], classes, []);
+    const found = offlineVocabularyFindings(
+      [
+        {
+          file: "src/features/fixture.tsx",
+          source: `const close = ${hook}(r, lens); close.mutate(v);`,
+        },
+      ],
+      classes,
+      [],
+    );
     assert.equal(found.boundFiles, 1);
     assert.equal(found.failures.length, 1);
   }
@@ -1464,7 +1504,10 @@ test("offline vocabulary flags bound network writes and stale file exemptions", 
   const check = (source, exempt = [], path = file) =>
     offlineVocabularyFindings([{ file: path, source }], classes, exempt);
   assert.equal(check(source).failures.length, 1);
-  assert.equal(check(source.replace(".mutate(", ".mutateAsync(")).failures.length, 1);
+  assert.equal(
+    check(source.replace(".mutate(", ".mutateAsync(")).failures.length,
+    1,
+  );
   assert.deepEqual(check(`${source}\nwrite.isPaused;`).failures, []);
   for (const decoy of [
     "config.isPaused;",
@@ -1473,12 +1516,19 @@ test("offline vocabulary flags bound network writes and stale file exemptions", 
     "write.isPausedSuffix;",
     "other.write.isPaused;",
     "// write.isPaused",
-  ]) assert.equal(check(`${source}\n${decoy}`).failures.length, 1);
+  ])
+    assert.equal(check(`${source}\n${decoy}`).failures.length, 1);
   for (const token of OFFLINE_VOCABULARY) {
     assert.deepEqual(check(`${source}\nconst reason = ${token};`).failures, []);
-    assert.equal(check(`${source}\nconst reason = ${token}Suffix;`).failures.length, 1);
+    assert.equal(
+      check(`${source}\nconst reason = ${token}Suffix;`).failures.length,
+      1,
+    );
     assert.equal(check(`${source}\n// ${token}`).failures.length, 1);
-    assert.equal(check(`${source}\nconst reason = "${token}";`).failures.length, 1);
+    assert.equal(
+      check(`${source}\nconst reason = "${token}";`).failures.length,
+      1,
+    );
   }
   for (const clean of [
     source.replace("useRemote", "useLocal"),
@@ -1490,10 +1540,15 @@ test("offline vocabulary flags bound network writes and stale file exemptions", 
   ])
     assert.deepEqual(check(clean).failures, []);
   assert.deepEqual(check(source, [], "src/lib/fixture.ts").failures, []);
-  assert.equal(check(source, [], "src/components/fixture.tsx").failures.length, 1);
+  assert.equal(
+    check(source, [], "src/components/fixture.tsx").failures.length,
+    1,
+  );
   const exempt = [{ file, bucket: "pending wave triage" }];
   assert.deepEqual(check(source, exempt), {
-    boundFiles: 1, failures: [], stale: [],
+    boundFiles: 1,
+    failures: [],
+    stale: [],
   });
   for (const clean of [
     "",
@@ -1502,7 +1557,10 @@ test("offline vocabulary flags bound network writes and stale file exemptions", 
     `${source}\nuseOnline();`,
   ])
     assert.deepEqual(check(clean, exempt).stale, exempt);
-  assert.deepEqual(offlineVocabularyFindings([], classes, exempt).stale, exempt);
+  assert.deepEqual(
+    offlineVocabularyFindings([], classes, exempt).stale,
+    exempt,
+  );
 });
 
 const verdictOf = (src, file) => {
@@ -1602,7 +1660,11 @@ test("every network callee makes a network site, flagged when annotated", () => 
     ["network"],
     "one network callee left a site local",
   );
-  assert.equal(mixed.flagged, 2, "a mixed site carrying always must flag both rules");
+  assert.equal(
+    mixed.flagged,
+    2,
+    "a mixed site carrying always must flag both rules",
+  );
   // A non-null-asserted call is a call.
   const asserted = verdictOf(
     'useMutation({ mutationFn: async () => { saveThing(r); api.gitPush!(r); }, networkMode: "always" });',
@@ -2194,7 +2256,9 @@ test("UI files binding and calling network mutation hooks carry offline vocabula
   const addedClasses = new Map(
     [...classes].filter(([hook]) => !directClasses.has(hook)),
   );
-  t.diagnostic(`${addedClasses.size} same-file caller hooks added to the class map`);
+  t.diagnostic(
+    `${addedClasses.size} same-file caller hooks added to the class map`,
+  );
   t.diagnostic(
     `${offlineVocabularyFindings(sources, addedClasses, []).boundFiles} UI files bind and call newly mapped hooks (may overlap previously counted files)`,
   );

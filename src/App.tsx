@@ -25,7 +25,6 @@ import { usePickAndOpenRepo } from "@/features/repository/useOpenRepoByPath";
 import { SettingsScreen } from "@/features/settings/SettingsScreen";
 import { CommandPalette } from "@/features/shortcuts/CommandPalette";
 import { ShortcutsDialog } from "@/features/shortcuts/ShortcutsDialog";
-import { UpdateChecker } from "@/features/updates/UpdateChecker";
 import { WhatsNew } from "@/features/updates/WhatsNew";
 import { CloneRepoDialog } from "@/features/welcome/CloneRepoDialog";
 import { CreateRepoDialog } from "@/features/welcome/CreateRepoDialog";
@@ -35,6 +34,7 @@ import { WelcomeScreen } from "@/features/welcome/WelcomeScreen";
 import { syncAnalytics, track } from "@/lib/analytics";
 import { useBackgroundPrSync } from "@/lib/automations/useBackgroundPrSync";
 import { refreshRepoOnFocus, useGitInstalled } from "@/lib/git/queries";
+import { useGitLabWorkBackground } from "@/lib/git/queries/gitlab-work";
 import { useHotkeyAction, useHotkeysListener } from "@/lib/hotkeys/hotkeys";
 import { useModalGateOpen } from "@/lib/hotkeys/modal-gate";
 import { useNavHistoryActions } from "@/lib/hotkeys/nav-history-actions";
@@ -200,6 +200,13 @@ function App() {
   // this catches pushes to repos you've switched away from. Always mounted (any
   // view, welcome included); no-op unless a recent repo carries a pr-sync rule.
   useBackgroundPrSync();
+  // Keep the home lists warm while an MR, repository or settings screen is open.
+  // Activity-hidden panels disconnect effects, so the loader belongs here.
+  useGitLabWorkBackground(
+    gitInstalled.isSuccess,
+    settings.data?.myWorkTeamLabels ?? [],
+    settings.data?.myWorkWatchedMergeRequests ?? [],
+  );
 
   // The app-wide hotkey dispatcher plus the always-available actions.
   useHotkeysListener();
@@ -285,11 +292,6 @@ function App() {
     openMyWork();
   };
   useHotkeyAction("work-mine", () => openWorkCategory("mine"), !dialogOpen);
-  useHotkeyAction(
-    "work-authored",
-    () => openWorkCategory("authored"),
-    !dialogOpen,
-  );
   useHotkeyAction("work-team", () => openWorkCategory("team"), !dialogOpen);
   useHotkeyAction(
     "work-mentioned",
@@ -456,7 +458,6 @@ function App() {
         />
       )}
       <ReconnectDialog />
-      <UpdateChecker />
       <WhatsNew />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

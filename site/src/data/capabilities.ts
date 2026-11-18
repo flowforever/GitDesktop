@@ -71,7 +71,8 @@ export const capabilities: Capability[] = [
   },
   {
     group: "Diffs & staging",
-    label: "Collapsible surrounding context",
+    label:
+      "Collapsible surrounding context shared by Local Changes and MR diffs",
   },
   {
     group: "Diffs & staging",
@@ -345,7 +346,7 @@ export const capabilities: Capability[] = [
   {
     group: "Pull requests & review",
     label:
-      "GitLab MR Diff / Full file toggle — compare complete before-and-after file content with change highlights",
+      "GitLab MR Diff / Full file toggle — compare complete before-and-after file content, expand nearby code and navigate visited files with back/forward history",
   },
   {
     group: "Pull requests & review",
@@ -582,7 +583,7 @@ export const capabilities: Capability[] = [
   {
     group: "Repository & workspace",
     label:
-      "My works — a GitLab home with six work categories, native Todos and complete MR details in separate app tabs; pinned My works and Repositories navigation",
+      "My works — five GitLab categories with combined personal and watched MRs, Open / Merged filters, background loading, authors and colored labels, native Todos and complete MR detail tabs",
     ai: false,
     highlight: true,
   },
@@ -594,7 +595,7 @@ export const capabilities: Capability[] = [
   {
     group: "Repository & workspace",
     label:
-      "Repositories chooser with a full-height searchable list, a compact action panel at the top right, and separate repository tabs",
+      "Repositories chooser with a full-height searchable list, per-repository worktree menus, the 20 most recently active worktrees, and separate checkout tabs",
     ai: false,
   },
   {

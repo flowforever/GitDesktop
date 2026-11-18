@@ -10,6 +10,7 @@ export type SettingsDraft = Omit<
   AppSettings,
   | "recentRepos"
   | "myWorkTeamLabels"
+  | "myWorkWatchedMergeRequests"
   | "diffViewMode"
   | "diffHideWhitespace"
   | "changesViewMode"
@@ -29,6 +30,7 @@ export function toDraft(settings: AppSettings): SettingsDraft {
   const {
     recentRepos,
     myWorkTeamLabels,
+    myWorkWatchedMergeRequests,
     diffViewMode,
     diffHideWhitespace,
     changesViewMode,

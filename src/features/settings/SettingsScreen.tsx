@@ -85,7 +85,6 @@ import {
 } from "./save-reset";
 import { settingsFormOpts, toDraft } from "./settings-form";
 import { TerminalSection } from "./TerminalSection";
-import { UpdatesSection } from "./UpdatesSection";
 
 // The Syntax panel pulls in the Shiki TextMate highlighter (@git-diff-view +
 // @shikijs/core), which is heavy and only needed once this panel is visited.
@@ -112,7 +111,6 @@ const PANELS = [
   { id: "syntax", label: "Syntax" },
   { id: "editor", label: "External editor" },
   { id: "terminal", label: "Terminal" },
-  { id: "updates", label: "Updates" },
   { id: "about", label: "About" },
 ] as const;
 
@@ -840,7 +838,6 @@ export function SettingsScreen() {
               )}
               {activePanel === "editor" && <EditorSection form={form} />}
               {activePanel === "terminal" && <TerminalSection form={form} />}
-              {activePanel === "updates" && <UpdatesSection form={form} />}
               {activePanel === "about" && <AboutSection />}
             </main>
           </ScrollArea>

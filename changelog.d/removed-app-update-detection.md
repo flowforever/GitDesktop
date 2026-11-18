@@ -1,0 +1,1 @@
+- Remove in-app version checks, update notifications and download/install controls. The installed version remains available in About, and What's new shows its changelog.

@@ -66,6 +66,7 @@ export function RecentRepoList({
           )}
         >
           <RepoList
+            showWorktrees
             fillHeight={fillHeight}
             onAliasRepo={setAliasTarget}
             onRemoveRepo={setRemoveTarget}

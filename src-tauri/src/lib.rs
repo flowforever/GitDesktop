@@ -415,6 +415,7 @@ pub fn run() {
             forge::gitlab_work::gitlab_work_hosts,
             forge::gitlab_work::gitlab_work_accounts,
             forge::gitlab_work::gitlab_work_items,
+            forge::gitlab_work::gitlab_work_watch_mr,
             forge::gitlab_work::gitlab_work_todos,
             forge::gitlab_work::gitlab_work_todo_done,
             forge::forge_my_teams,

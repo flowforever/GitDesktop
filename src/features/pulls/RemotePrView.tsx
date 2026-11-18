@@ -347,6 +347,7 @@ import {
   useLinkedIssueChips,
 } from "./useLinkedIssueChips";
 import { usePrCapabilities } from "./usePrCapabilities";
+import { usePrFileHistory } from "./usePrFileHistory";
 
 /** The git remote a lens resolves to, mirroring the backend's own mapping
  *  (github/mod.rs:73 `lens_remote`). Exhaustive on purpose: a widened `RemoteLens`
@@ -2951,6 +2952,19 @@ export function RemotePrView({
     selectedPath && pr?.files.some((f) => f.path === selectedPath)
       ? selectedPath
       : (pr?.files[0]?.path ?? null);
+  const fileHeadSha =
+    pr?.headSha ||
+    (pr && !pr.commitsUnknown && !pr.commitsTruncated
+      ? prHeadSha(pr)
+      : undefined);
+  const fileHistory = usePrFileHistory(
+    JSON.stringify([repoPath, lens, shownNumber, fileHeadSha ?? null]),
+    selectedPath ?? effectivePath,
+    isSelectedPr &&
+      !detailsStale &&
+      hold.interactive &&
+      hold.shownKey === lastShown,
+  );
 
   // GitLab's merge sends a stale-view `sha` guard sourced from the forge-reported head.
   // Without one we can't guard, so GitLab disables Merge rather than merge unguarded on
@@ -5428,6 +5442,7 @@ export function RemotePrView({
               binaryPaths={binaryPaths}
               effectivePath={effectivePath}
               onSelectPath={pickPath}
+              fileHistory={fileHistory}
               fileDiff={fileDiff}
               isPending={prDiff.isPending}
               isError={prDiff.isError}
@@ -5475,12 +5490,7 @@ export function RemotePrView({
               mentions={mentions}
               // Pin the file-row Blame at the forge-reported tip: GitHub's capped
               // commits list can end short of it.
-              blameRev={
-                pr.headSha ||
-                (!pr.commitsUnknown && !pr.commitsTruncated
-                  ? prHeadSha(pr)
-                  : undefined)
-              }
+              blameRev={fileHeadSha}
             />
           )}
         </div>

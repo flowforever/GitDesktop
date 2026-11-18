@@ -53,7 +53,7 @@ provider you connect it to.
 
 ## Updates and changes
 
-GitDesktop can update itself to newer **signed** releases. We may revise these
+You can install newer **signed** releases. We may revise these
 terms; material changes will be noted in the release notes or in-app. Continued
 use after a change means you accept it.
 

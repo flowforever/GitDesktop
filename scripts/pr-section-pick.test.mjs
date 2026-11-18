@@ -233,18 +233,9 @@ test("PrFilesPane routes tree picks through its user selection handler", () => {
     auditChild(text, {
       prop: "onSelectPath",
       calls: [
-        /^\s*onSelectPath\(path\);$/,
-        // Import activation notes its epoch before asynchronous resolution.
-        /^\s*onSelectPath\(target\);$/,
+        // Tree, toolbar, import and history selections share one user route.
+        /^\s*if \(visit\.kind === "change"\) onSelectPath\(visit\.path\);$/,
       ],
-    }),
-    [],
-  );
-  // The toolbar arrows forward user activations through the same picker.
-  assert.deepEqual(
-    auditChild(text, {
-      prop: "selectFile",
-      calls: [/^\s*selectFile\(path\);$/],
     }),
     [],
   );

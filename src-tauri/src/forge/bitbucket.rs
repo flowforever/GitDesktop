@@ -750,6 +750,8 @@ fn my_work_item_from_value(raw: &serde_json::Value) -> Option<MyWorkItem> {
             .and_then(Value::as_str)
             .filter(|l| !l.is_empty())
             .map(str::to_string),
+        labels: Vec::new(),
+        label_colors: Default::default(),
     })
 }
 

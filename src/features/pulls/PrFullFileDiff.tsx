@@ -16,15 +16,13 @@ import { DiffContent } from "@/features/diff/DiffSurfaceLazy";
 import { useReportPaneSettled } from "@/features/diff/diff-pane-hold";
 import { type SlotRead, useSlotRead } from "@/features/diff/file-slot";
 import { presentError } from "@/lib/error-summary";
-import type { PrSnapshotComparison } from "@/lib/git/api/pr-snapshot";
 import { FULL_OID_RE } from "@/lib/git/oid";
 import { prSnapshotComparisonOptions } from "@/lib/git/queries/pr-snapshot";
 import type { RemoteLens } from "@/lib/git/types";
 import { PrCodeImportLinks } from "./PrCodeImportLinks";
 import { PrFullFileLoading } from "./PrFullFileLoading";
 import {
-  buildPrFullContext,
-  decodePrFullFile,
+  buildPrSnapshotContext,
   type FullContextRefusal,
 } from "./pr-full-context";
 
@@ -43,53 +41,6 @@ const EMPTY = {
   deleted: "Deleted empty file",
   unchanged: "Both versions are empty.",
 };
-
-function validBytes(value: unknown): boolean {
-  if (value === null) return true;
-  if (typeof value !== "object") return false;
-  const data = value as Record<string, unknown>;
-  return (
-    (data.base64 === null || typeof data.base64 === "string") &&
-    (data.mime === null || typeof data.mime === "string") &&
-    typeof data.tooLarge === "boolean" &&
-    (data.size === null ||
-      (typeof data.size === "number" &&
-        Number.isFinite(data.size) &&
-        data.size >= 0))
-  );
-}
-
-function fullContext(
-  data: PrSnapshotComparison,
-  path: string,
-  headSha: string,
-): ReturnType<typeof buildPrFullContext> {
-  if (
-    !data ||
-    typeof data.headSha !== "string" ||
-    typeof data.baseSha !== "string" ||
-    !FULL_OID_RE.test(data.baseSha) ||
-    data.headSha.toLowerCase() !== headSha.toLowerCase() ||
-    (data.oldPath !== null && typeof data.oldPath !== "string") ||
-    (data.newPath !== null && typeof data.newPath !== "string") ||
-    (data.patch !== null && typeof data.patch !== "string") ||
-    !validBytes(data.before) ||
-    !validBytes(data.after)
-  )
-    return { kind: "unavailable", reason: "invalid" };
-  const before = decodePrFullFile(data.before);
-  if (before.kind === "unavailable") return before;
-  const after = decodePrFullFile(data.after);
-  if (after.kind === "unavailable") return after;
-  return buildPrFullContext({
-    path,
-    oldPath: data.oldPath,
-    newPath: data.newPath,
-    before: before.text,
-    after: after.text,
-    patch: data.patch,
-  });
-}
 
 function ComparisonReadGate({ settled }: { settled: boolean }) {
   useReportPaneSettled(settled);
@@ -131,7 +82,9 @@ export function PrFullFileDiff({
   });
   const result = useMemo(
     () =>
-      read.data === undefined ? null : fullContext(read.data, path, headSha),
+      read.data === undefined
+        ? null
+        : buildPrSnapshotContext(read.data, path, headSha),
     [read.data, path, headSha],
   );
   const pane = resolveDetailPane({
@@ -205,7 +158,7 @@ export function PrFullFileDiff({
         repoPath={repoPath}
         anchorCommit={headSha}
         fullContext
-        fullContextContent={result.content}
+        fileContent={result.content}
       />
     );
     if (onOpenImport)

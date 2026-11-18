@@ -334,7 +334,7 @@ export interface AppSettings {
   showBoardSelectionHint: boolean;
   /** Show the "drag to stage individual lines" hint in the working-tree diff. */
   showLineStageHint: boolean;
-  /** Check GitHub Releases for a new version on launch (install stays opt-in). */
+  /** Legacy persisted preference; app version checks are no longer scheduled. */
   autoCheckUpdates: boolean;
   /** Periodically run a background `git fetch` for the open repo so the
    *  behind-count and incoming commits stay current. Fetch only — never pulls,
@@ -374,6 +374,8 @@ export interface AppSettings {
   recentRepos: RecentRepo[];
   /** App-wide OR filter for the GitLab Team Merge Requests home category. */
   myWorkTeamLabels: string[];
+  /** Canonical GitLab MR links watched in Mine; merged MRs remain in Merged. */
+  myWorkWatchedMergeRequests: string[];
   /** Color theme (Settings → Appearance). "system" follows the OS scheme; "slate" is a
    *  softer dark variant that lifts surfaces off pure black to reduce eye strain. Applied
    *  outside the bulk settings form (apply-on-change), like diffViewMode. */
@@ -853,18 +855,10 @@ export function setBitbucketTokenExpiresAt(
   });
 }
 
-/**
- * Saves a whole settings object built by the UI (which holds a snapshot from before the
- * user started editing) without losing what the chained writers changed meanwhile.
- *
- * `recentRepos` and `bitbucketTokenExpiresAt` are the only fields those writers own, so
- * they're re-pinned from a read taken INSIDE the critical section — the caller's snapshot
- * of them is stale by definition, every other field is the user's intent. `mcpServers`,
- * which `relocateRecentRepo` also rewrites, stays the caller's: the user edits it here, and
- * an open form re-homes its draft copy via {@link subscribeMcpRehome}.
- * `diffHideWhitespace` is re-pinned too: only its field-only patch writer owns it, so a
- * snapshot's optimistic copy must never persist past that patch's own failure.
- */
+/** A bulk snapshot cannot replace newer recents, token expiry, whitespace
+ *  preference or watched MRs: those fields come from the read inside the
+ *  serialized write. The remaining fields carry the form's intent; MCP
+ *  relocation reaches that draft via {@link subscribeMcpRehome}. */
 export function saveSettingsMerged(
   settings: AppSettings,
 ): Promise<AppSettings> {
@@ -875,6 +869,7 @@ export function saveSettingsMerged(
       recentRepos: fresh.recentRepos,
       bitbucketTokenExpiresAt: fresh.bitbucketTokenExpiresAt,
       diffHideWhitespace: fresh.diffHideWhitespace,
+      myWorkWatchedMergeRequests: fresh.myWorkWatchedMergeRequests,
     };
     await saveSettings(committed);
     return healLoadedSettings(committed);

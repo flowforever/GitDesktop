@@ -252,8 +252,8 @@ export interface DiffContentRevs {
   newRev?: string | null;
 }
 
-/** Exact, caller-verified text paired with its bounded complete-context patch. */
-interface FullContextContent {
+/** Exact, caller-verified versions matching this patch, within renderer budgets. */
+interface DiffFileContent {
   old: string | null;
   new: string | null;
 }
@@ -340,7 +340,7 @@ export function GitDiffView({
   oldPath,
   text,
   fullContext = false,
-  fullContextContent,
+  fileContent,
   repoPath,
   contentRevs,
   lineAnchors,
@@ -358,7 +358,7 @@ export function GitDiffView({
   /** Caller-verified, bounded complete context: skip only the row preview cap.
    *  Generated-line and shortening guards remain active. */
   fullContext?: boolean;
-  fullContextContent?: FullContextContent;
+  fileContent?: DiffFileContent;
   /** The diff's own repo, for reading full file text (highlight context). */
   repoPath?: string;
   contentRevs?: DiffContentRevs;
@@ -394,7 +394,7 @@ export function GitDiffView({
           oldPath={oldPath}
           text={text}
           fullContext={fullContext}
-          fullContextContent={fullContextContent}
+          fileContent={fileContent}
           repoPath={repoPath}
           contentRevs={contentRevs}
           lineAnchors={lineAnchors}
@@ -1142,7 +1142,7 @@ function RenderedDiff({
   oldPath,
   text,
   fullContext = false,
-  fullContextContent,
+  fileContent,
   repoPath,
   contentRevs,
   lineAnchors,
@@ -1156,7 +1156,7 @@ function RenderedDiff({
   oldPath?: string;
   text: string;
   fullContext?: boolean;
-  fullContextContent?: FullContextContent;
+  fileContent?: DiffFileContent;
   repoPath?: string;
   contentRevs?: DiffContentRevs;
   lineAnchors?: DiffLineAnchor[];
@@ -1194,9 +1194,22 @@ function RenderedDiff({
   const deferredText = useDeferredValue(text);
   const deferredPath = useDeferredValue(filePath);
   const deferredOldPath = useDeferredValue(oldPath ?? filePath);
-  const deferredFullContent = useDeferredValue(
-    fullContext ? fullContextContent : undefined,
+  const incomingFileContent = useDeferredValue(fileContent);
+  const providedContext = useMemo(
+    () => ({
+      path: deferredPath,
+      text: deferredText,
+      content: incomingFileContent,
+    }),
+    [deferredPath, deferredText, incomingFileContent],
   );
+  // A queued deferred read can reach this renderer after the caller has already
+  // retained its new prop. Hold it here too before it can replace a live editor.
+  const paintedContext = useRetained(providedContext, !lineComposerOpen());
+  const deferredFileContent =
+    paintedContext.path === deferredPath && paintedContext.text === deferredText
+      ? paintedContext.content
+      : undefined;
 
   // Reset on the DEFERRED path, not the urgent `filePath`: `blocked` derives
   // from `deferredText`, so an urgent reset would re-block the OUTGOING mega
@@ -1236,7 +1249,7 @@ function RenderedDiff({
     // whole-file reads content mode maps syntax onto, and the two whole-file
     // IPC reads are pure waste when we're going to hunk-only anyway — skip
     // content mode entirely once any line is over the shorten cap.
-    deferredFullContent !== undefined || longestLine > DIFF_MAX_LINE_CHARS
+    deferredFileContent !== undefined || longestLine > DIFF_MAX_LINE_CHARS
       ? undefined
       : contentRevs,
   );
@@ -1244,17 +1257,17 @@ function RenderedDiff({
   // preserving snapshot metadata; stable identity avoids rebuilding on row reports.
   const content = useMemo(
     () =>
-      deferredFullContent === undefined
+      deferredFileContent === undefined
         ? readContent
         : {
-            old: deferredFullContent.old ?? "",
-            new: deferredFullContent.new ?? "",
+            old: deferredFileContent.old ?? "",
+            new: deferredFileContent.new ?? "",
           },
-    [deferredFullContent, readContent],
+    [deferredFileContent, readContent],
   );
   const contentPending =
-    deferredFullContent === undefined && readContentPending;
-  const contentHold = deferredFullContent === undefined && readContentHold;
+    deferredFileContent === undefined && readContentPending;
+  const contentHold = deferredFileContent === undefined && readContentHold;
 
   const { shown, hidden, shortened } = useMemo(() => {
     // On a blocked mega file we show a placeholder, not a diff — do no cap or
@@ -2162,7 +2175,7 @@ export function DiffContent({
   anchorCommit,
   whitespaceControl = false,
   fullContext = false,
-  fullContextContent,
+  fileContent,
 }: {
   filePath: string;
   /** Absent only when the source query has nothing to show; never an empty
@@ -2211,9 +2224,9 @@ export function DiffContent({
   /** Complete context already verified and bounded by the caller. Shows every
    *  row immediately, preserving the renderer's long-line safety guards. */
   fullContext?: boolean;
-  /** Already-read exact versions for a verified full-context patch. Used only
-   *  with fullContext and never for truncated or retained placeholder data. */
-  fullContextContent?: FullContextContent;
+  /** Already-read exact versions verified against this patch. The shared renderer
+   *  keeps omitted context collapsed, unless the supplied patch includes it. */
+  fileContent?: DiffFileContent;
 }) {
   // The pane measures itself: this surface mounts at widths from a full window
   // down to a rail-flanked column, and both the split gate and the toolbar's
@@ -2774,9 +2787,9 @@ export function DiffContent({
               fullContext={
                 fullContext && !data.isTruncated && !dataIsPlaceholder
               }
-              fullContextContent={
-                fullContext && !data.isTruncated && !dataIsPlaceholder
-                  ? fullContextContent
+              fileContent={
+                !data.isTruncated && !dataIsPlaceholder
+                  ? fileContent
                   : undefined
               }
               repoPath={repoPath}

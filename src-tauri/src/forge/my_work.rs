@@ -6,7 +6,7 @@
 //! [`MyWorkLeg`]s and [`merge_legs`] folds them into the single wire page. Item
 //! shapes are neutral so the frontend renders one row type whatever answered.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
@@ -58,6 +58,8 @@ pub struct MyWorkItem {
     /// arm must normalize or mixed spellings mis-order silently.
     pub updated_at: String,
     pub author_login: Option<String>,
+    pub labels: Vec<String>,
+    pub label_colors: BTreeMap<String, String>,
 }
 
 /// One page of the inbox, and whether anything was left off it.
@@ -198,6 +200,8 @@ mod tests {
             url: url.into(),
             updated_at: updated.into(),
             author_login: Some("someone".into()),
+            labels: Vec::new(),
+            label_colors: Default::default(),
         }
     }
 
@@ -233,6 +237,8 @@ mod tests {
                 "host",
                 "isDraft",
                 "isPullRequest",
+                "labelColors",
+                "labels",
                 "number",
                 "provider",
                 "repoFullName",

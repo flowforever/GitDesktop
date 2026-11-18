@@ -42,8 +42,8 @@ active account per host.
 **[Download the latest release →](https://github.com/theBGuy/GitDesktop/releases/latest)**
 
 Pick the installer for your OS under **Assets**. On macOS you can also install
-with Homebrew: `brew install --cask thebguy/tap/gitdesktop`. Builds are signed
-and keep themselves up to date (see [Updates](#updates)). To build from source
+with Homebrew: `brew install --cask thebguy/tap/gitdesktop`. Builds are signed.
+Install newer versions using your package manager or the latest installer. To build from source
 instead, see [Development](#development).
 
 ## Highlights
@@ -55,7 +55,7 @@ instead, see [Development](#development).
   [Bitbucket Cloud](#bitbucket-cloud), each with PRs/MRs, CI, and project
   settings in the same panels; [issues in-app](#issues-and-to-dos) on GitHub
   and GitLab, or via [Jira](#jira-cloud-issues) on Bitbucket.
-- **[My works](#my-works), your GitLab start page**: personal, authored,
+- **[My works](#my-works), your GitLab start page**: personal, watched,
   team-labelled and mentioned merge requests, native Todos and issues across
   your GitLab instances. Open complete MR details in separate app tabs.
 - **A [GitHub Actions cockpit](#github-actions)**: runs you can filter by
@@ -93,7 +93,10 @@ The **Repositories** tab keeps the searchable repository list on the left and
 Open, Clone, Create and other actions in a panel at the top right. The list fills
 the remaining window height and scrolls internally. Opening a repository creates
 its own application tab; reopening the same checkout selects the existing tab.
-Help and Settings sit beside the action panel's heading.
+Help and Settings sit beside the action panel's heading. A **Recent worktrees**
+panel below the actions lists the latest 20 linked worktrees by Git activity.
+Each repository row also has a worktree menu. Both entries open the selected
+worktree in its own tab, reusing an existing tab for the same checkout.
 
 Clone, add local, create (with README / .gitignore / license scaffolding),
 publish to GitHub, GitLab, or Bitbucket, and fork.
@@ -451,13 +454,17 @@ in one click.
   keeps complete file names and scrolls horizontally for long names. MR tabs
   show request actions beside Checkout, Edit and the forge link. Toolbar arrows
   reveal changed files in the tree and navigate individual change blocks.
+  Left/right arrows beside the file arrows move through visited files, restoring
+  their file-list scope and tree selection. Each MR tab keeps its own history.
 - **File context while reviewing**: toggle **All files** in the Files sidebar
   to browse the complete tree at the request's head commit. Unchanged files have
   a separate marker and open as read-only source; changed files keep their diff.
   Scope switches start with folders collapsed, marking directories that contain
   changes and their parents. For GitLab MRs, **Diff / Full file** switches a changed
   file between its patch and complete before-and-after comparison. The view fetches
-  missing commit objects without switching your branch.
+  missing commit objects without switching your branch. In Diff view, the shared
+  context arrows reveal code above, between and below change blocks, using that
+  MR's before-and-after versions. Other files stay unloaded.
 - **Follow imports while reviewing**: click an import, module or include path
   in a diff or source preview to open its file at the request's head and reveal
   it in the tree. Supports JavaScript/TypeScript, Python, Go, Rust, Java/Kotlin,
@@ -1028,16 +1035,23 @@ it doesn't normally appear. Fully keyboard-navigable.
 ### My works
 
 GitDesktop opens on **My works**, a GitLab workspace across the instances
-configured in `glab`. Six categories keep different kinds of work separate:
+configured in `glab`. Five categories keep different kinds of work separate:
 
-- **My Merge Requests** (default): open MRs assigned to you or listing you as a reviewer.
-- **Authored by Me**: open MRs you created.
-- **Team Merge Requests**: open MRs matching any configured team label across
+- **My Merge Requests** (default): MRs assigned to you, listing you as a reviewer,
+  created by you, or added with **Watch MR**. Duplicate MRs appear once.
+- **Team Merge Requests**: MRs matching any configured team label across
   projects you can access. Configure up to six labels from this category.
-- **Mentioned Me**: open MRs with GitLab mention records, excluding MRs assigned
+- **Mentioned Me**: MRs with GitLab mention records, excluding MRs assigned
   to you or listing you as a reviewer. Both pending and completed mention records count.
 - **Todos**: pending GitLab to-dos, with a Done action for each item.
 - **Issues**: open issues you created or are assigned to.
+
+The category lists preload in the background, including while you review an MR
+or use another screen. Switching categories uses the cached page while fresh
+data loads. Labels follow the MR title on the same line, using their GitLab
+background colors with readable text. The author appears below. Todo targets show
+metadata when available. The active page tab uses an accent highlight; category
+tabs use a subtle neutral selection.
 
 MR rows open complete details in separate, closable application tabs. Opening
 an MR again selects its existing tab. GitDesktop uses a verified local checkout
@@ -1048,8 +1062,15 @@ Comments and review drafts remain associated with their MR as you switch tabs.
 The pinned **My works** tab keeps your place in the list. The adjacent pinned
 **Repositories** tab opens the repository chooser without closing your MR tabs.
 
+Use **Open / Merged** before the search field to choose each MR list's status.
+Both states preload in the background; Issues and Todos keep their own scopes.
+**Watch MR** accepts a link from a configured GitLab host and saves it locally.
+Watched requests remain in Merged after merging and disappear when closed.
+The watch dialog can also remove saved watches. Watched lists refresh every
+minute while the app is active; **Refresh** checks them immediately.
+
 Filter loaded items by title, project or number. Arrow keys navigate the MR list,
-and Enter opens the selection. Refresh reloads the selected category. Results
+and Enter opens the selection. Refresh reloads the background work lists. Results
 are bounded; a note appears when items may be missing. Mentioned Me reflects the
 mention history GitLab retains. Team labels persist across restarts; open MR tabs
 last for the current session.
@@ -1501,10 +1522,8 @@ review via its subscription login. The full list is under
   in one repo without changing your global identity.
 - **Git hooks**: view, edit, enable/disable, and template `.git/hooks`, with
   husky / pre-commit / lefthook detection and install integration.
-- **Self-updating**: signed, verified auto-updates from GitHub Releases,
-  checked at launch and periodically in the background, with a persistent
-  in-app indicator when one is ready. Always installed on your consent; see
-  [Updates](#updates).
+- **Installed version and changelog**: Settings → **About** shows app and component
+  versions. **What's new** shows the changelog for your installed version.
 
 ## AI configuration
 
@@ -1565,13 +1584,10 @@ review via its subscription login. The full list is under
 
 ## Updates
 
-GitDesktop checks GitHub Releases on launch and about every six hours in the
-background while the app stays open (opt-out in Settings → Updates). A
-pending update shows a dot on the Settings gear and an **Install & restart**
-banner in Settings → Updates, and installs **only on your consent**.
-If changes made offline are still waiting to send, GitDesktop asks before
-the restart discards them. Updates are cryptographically signed and verified
-by the app, separately from OS code signing.
+Install newer versions using your package manager or download the installer
+from [GitHub Releases](https://github.com/theBGuy/GitDesktop/releases/latest).
+Settings → **About** shows the installed app version, and **What's new** contains
+its changelog.
 
 ## Requirements
 

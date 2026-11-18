@@ -167,6 +167,8 @@ fn item_from_intake(raw: GhSearchItem, default_is_pull_request: bool) -> Option<
         // strings ACROSS providers, so every arm folds through the one normalizer.
         updated_at: normalize_updated_at(&raw.updated_at.unwrap_or_default()),
         author_login: raw.author.and_then(|a| a.login).filter(|l| !l.is_empty()),
+        labels: Vec::new(),
+        label_colors: Default::default(),
     })
 }
 
@@ -316,6 +318,8 @@ mod tests {
                 "host",
                 "isDraft",
                 "isPullRequest",
+                "labelColors",
+                "labels",
                 "number",
                 "provider",
                 "repoFullName",
@@ -342,6 +346,8 @@ mod tests {
                 // gh's `…SSZ` is zero-padded to the merge's fixed width.
                 "updatedAt": "2026-09-05T23:21:02.000Z",
                 "authorLogin": "octo-cat",
+                "labels": [],
+                "labelColors": {},
             })
         );
 

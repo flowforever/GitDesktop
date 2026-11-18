@@ -1,4 +1,9 @@
-import { ClockIcon, FilesIcon } from "@phosphor-icons/react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ClockIcon,
+  FilesIcon,
+} from "@phosphor-icons/react";
 import {
   type ComponentProps,
   lazy,
@@ -89,6 +94,12 @@ import { PrFilesTree, type PrTreeFile } from "./PrFilesTree";
 import { PrFullFileLoading } from "./PrFullFileLoading";
 import { PrImportTargetPicker } from "./PrImportTargetPicker";
 import { ReviewThreadCard, type SuggestionApply } from "./ReviewThreads";
+import { usePrDiffContext } from "./usePrDiffContext";
+import {
+  type PrFileHistory,
+  type PrFileVisit,
+  usePrFileHistory,
+} from "./usePrFileHistory";
 import { usePrImportNavigation } from "./usePrImportNavigation";
 
 type PrFile = { path: string; additions: number; deletions: number };
@@ -102,7 +113,13 @@ const PrFullFileDiff = lazy(() =>
 );
 
 type PrFileView =
-  | { kind: "diff"; path: string }
+  | {
+      kind: "diff";
+      path: string;
+      headSha: string | null;
+      lens: RemoteLens;
+      number: number | undefined;
+    }
   | {
       kind: "source";
       path: string;
@@ -239,6 +256,7 @@ export function PrFilesPane({
   blameRev,
   changesIncomplete = false,
   interactionEnabled = true,
+  fileHistory,
 }: {
   files: PrFile[];
   /** Rows to show as binary (`binaryRowPaths`: 0/0 forge counts over a marker
@@ -273,22 +291,57 @@ export function PrFilesPane({
   changesIncomplete?: boolean;
   /** The parent is showing this request's settled, interactive details. */
   interactionEnabled?: boolean;
+  /** Owned above the Files section so visits and scope survive its remount. */
+  fileHistory?: PrFileHistory;
 } & DiffThreadWiring) {
   const diffEntity = `${lens ?? ""}#${number ?? ""}`;
-  const scopeKey = JSON.stringify([repoPath, diffEntity]);
+  const scopeKey = JSON.stringify([repoPath, diffEntity, blameRev ?? null]);
+  const ownHistory = usePrFileHistory(
+    scopeKey,
+    effectivePath,
+    interactionEnabled && fileHistory === undefined,
+  );
+  const history = fileHistory ?? ownHistory;
+  const restoreVisit =
+    history.current?.kind === "source" ||
+    history.previous !== null ||
+    history.next !== null
+      ? history.current
+      : null;
   const [treeReveal, setTreeReveal] = useState<{
     key: string;
     path: string;
     id: number;
-  } | null>(null);
-  const [scope, setScope] = useState({
+    active: boolean;
+  } | null>(() =>
+    restoreVisit
+      ? { key: scopeKey, path: restoreVisit.path, id: 1, active: true }
+      : null,
+  );
+  if (treeReveal !== null && treeReveal.key !== scopeKey)
+    setTreeReveal(
+      restoreVisit
+        ? {
+            key: scopeKey,
+            path: restoreVisit.path,
+            id: treeReveal.id + 1,
+            active: true,
+          }
+        : { ...treeReveal, key: scopeKey, active: false },
+    );
+  const [emptyScope, setEmptyScope] = useState({
     key: scopeKey,
     allFiles: false,
-    sourcePath: null as { path: string; headSha: string } | null,
   });
-  if (scope.key !== scopeKey) {
-    setScope({ key: scopeKey, allFiles: false, sourcePath: null });
-  }
+  const scope = {
+    allFiles:
+      history.current?.allFiles ??
+      (emptyScope.key === scopeKey && emptyScope.allFiles),
+    sourcePath:
+      history.current?.kind === "source" && blameRev
+        ? { path: history.current.path, headSha: blameRev }
+        : null,
+  };
   const fileViewKey = JSON.stringify([
     scopeKey,
     blameRev,
@@ -351,7 +404,7 @@ export function PrFilesPane({
     scope.allFiles &&
     scope.sourcePath !== null &&
     scope.sourcePath.headSha === blameRev &&
-    sourcePaths.has(scope.sourcePath.path) &&
+    (snapshot.data === undefined || sourcePaths.has(scope.sourcePath.path)) &&
     !changedPaths.has(scope.sourcePath.path)
       ? scope.sourcePath
       : null;
@@ -371,13 +424,20 @@ export function PrFilesPane({
           ? LAYOUT_COMPOSER_HELD
           : undefined;
   function toggleFileScope() {
-    if (!interactionEnabled || (!snapshotReady && !scope.allFiles)) return;
+    if (
+      !interactionEnabled ||
+      lineComposerOpen() ||
+      (!snapshotReady && !scope.allFiles)
+    )
+      return;
     useUiStore.getState().noteUserInteraction();
-    setScope((previous) => ({
-      ...previous,
-      allFiles: !previous.allFiles,
-      sourcePath: null,
-    }));
+    const path =
+      scope.allFiles && scope.sourcePath
+        ? (effectivePath ?? scope.sourcePath.path)
+        : (shownPath ?? history.current?.path);
+    if (path)
+      history.visit({ path, kind: "change", allFiles: !scope.allFiles });
+    else setEmptyScope({ key: scopeKey, allFiles: !scope.allFiles });
   }
   function setFileMode(full: boolean) {
     if (!interactionEnabled) return;
@@ -389,7 +449,7 @@ export function PrFilesPane({
   useHotkeyAction(
     "pr-toggle-all-files",
     toggleFileScope,
-    interactionEnabled && (snapshotReady || scope.allFiles),
+    interactionEnabled && !composerOpen && (snapshotReady || scope.allFiles),
   );
   useHotkeyAction(
     "pr-toggle-full-file",
@@ -399,32 +459,64 @@ export function PrFilesPane({
       (fullFile || fullFileReason === undefined),
   );
   const sourceLabel = changesIncomplete ? "Not in loaded changes" : "Unchanged";
-  const selectFile = (path: string) => {
-    if (
-      scope.allFiles &&
-      blameRev &&
-      sourcePaths.has(path) &&
-      !changedPaths.has(path)
-    ) {
-      useUiStore.getState().noteUserInteraction();
-      setScope((previous) => ({
-        ...previous,
-        sourcePath: { path, headSha: blameRev },
-      }));
-    } else {
-      setScope((previous) => ({ ...previous, sourcePath: null }));
-      onSelectPath(path);
-    }
-  };
-  function selectChangedFile(path: string) {
-    if (!interactionEnabled || lineComposerOpen()) return;
-    selectFile(path);
+  function revealFile(path: string) {
     setTreeReveal((previous) => ({
       key: scopeKey,
       path,
       id: (previous?.id ?? 0) + 1,
+      active: true,
     }));
   }
+  function navigateFile(
+    visit: PrFileVisit,
+    options?: { record?: false; reveal?: false },
+  ) {
+    if (!interactionEnabled || lineComposerOpen()) return;
+    useUiStore.getState().noteUserInteraction();
+    if (options?.record !== false) history.visit(visit);
+    if (visit.kind === "change") onSelectPath(visit.path);
+    if (options?.reveal !== false) revealFile(visit.path);
+    else
+      setTreeReveal((previous) =>
+        previous?.active ? { ...previous, active: false } : previous,
+      );
+  }
+  const selectFile = (path: string) =>
+    navigateFile(
+      {
+        path,
+        kind:
+          scope.allFiles && sourcePaths.has(path) && !changedPaths.has(path)
+            ? "source"
+            : "change",
+        allFiles: scope.allFiles,
+      },
+      // The tree owns its row focus; an external reveal would clear that intent.
+      { reveal: false },
+    );
+  function selectChangedFile(path: string) {
+    navigateFile({ path, kind: "change", allFiles: scope.allFiles });
+  }
+  function moveFileHistory(direction: "back" | "forward") {
+    if (!interactionEnabled || lineComposerOpen()) return;
+    const visit = direction === "back" ? history.back() : history.forward();
+    if (visit) navigateFile(visit, { record: false });
+  }
+  const historyHeldReason = !interactionEnabled
+    ? interactionReason
+    : composerOpen
+      ? LAYOUT_COMPOSER_HELD
+      : undefined;
+  useHotkeyAction(
+    "pr-file-back",
+    () => moveFileHistory("back"),
+    historyHeldReason === undefined && history.previous !== null,
+  );
+  useHotkeyAction(
+    "pr-file-forward",
+    () => moveFileHistory("forward"),
+    historyHeldReason === undefined && history.next !== null,
+  );
   const changesLabel = provider === "gitlab" ? "MR changes" : "PR changes";
   // Markdown preview reads the file at the PR head, so it's offered only once
   // that commit is a local object (after a Check out PR or a fetch).
@@ -455,7 +547,13 @@ export function PrFilesPane({
             lens: lens ?? "origin",
             number,
           }
-        : { kind: "diff", path: shownPath }
+        : {
+            kind: "diff",
+            path: shownPath,
+            headSha: blameRev ?? null,
+            lens: lens ?? "origin",
+            number,
+          }
     : null;
   const diffTarget = view
     ? keyedPaneView(repoPath ?? "", diffEntity, JSON.stringify(view), view)
@@ -477,21 +575,11 @@ export function PrFilesPane({
     enabled: !importDisabled,
     comparisonSupported,
     onNavigate: (target) => {
-      if (changedPaths.has(target)) {
-        setScope((previous) => ({ ...previous, sourcePath: null }));
-        onSelectPath(target);
-      } else if (blameRev) {
-        setScope((previous) => ({
-          ...previous,
-          allFiles: true,
-          sourcePath: { path: target, headSha: blameRev },
-        }));
-      }
-      setTreeReveal((previous) => ({
-        key: scopeKey,
+      navigateFile({
         path: target,
-        id: (previous?.id ?? 0) + 1,
-      }));
+        kind: changedPaths.has(target) ? "change" : "source",
+        allFiles: !changedPaths.has(target) || scope.allFiles,
+      });
     },
   });
 
@@ -502,7 +590,17 @@ export function PrFilesPane({
         files={treeFiles}
         binaryPaths={binaryPaths}
         effectivePath={shownPath}
-        revealRequest={treeReveal?.key === scopeKey ? treeReveal : undefined}
+        revealRequest={
+          treeReveal?.active &&
+          treeReveal.key === scopeKey &&
+          treeFiles.some(
+            (file) =>
+              file.path === treeReveal.path &&
+              !(file.sourceOnly && file.undecodable),
+          )
+            ? treeReveal
+            : undefined
+        }
         onSelectPath={selectFile}
         repoPath={repoPath}
         blameRev={blameRev}
@@ -517,14 +615,18 @@ export function PrFilesPane({
               aria-pressed={scope.allFiles}
               title={`${scope.allFiles ? "All files" : changesLabel} · ${scope.allFiles ? `Show ${changesLabel}` : "Show all files"}`}
               disabled={
-                !interactionEnabled || (!snapshotReady && !scope.allFiles)
+                !interactionEnabled ||
+                composerOpen ||
+                (!snapshotReady && !scope.allFiles)
               }
               reason={
                 !interactionEnabled
                   ? interactionReason
-                  : !snapshotReady
-                    ? "Reload this request to read its complete commit version."
-                    : undefined
+                  : composerOpen
+                    ? LAYOUT_COMPOSER_HELD
+                    : !snapshotReady
+                      ? "Reload this request to read its complete commit version."
+                      : undefined
               }
               onClick={toggleFileScope}
             >
@@ -533,7 +635,49 @@ export function PrFilesPane({
                 weight={scope.allFiles ? "fill" : "regular"}
               />
             </DisabledReasonButton>
-            <span className="ml-auto inline-flex">
+            <span className="ml-auto inline-flex items-center gap-1">
+              <span
+                role="group"
+                aria-label="File history navigation"
+                className="inline-flex shrink-0 items-center gap-1"
+              >
+                <DisabledReasonButton
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Back in file history"
+                  title="Back in file history"
+                  disabled={
+                    historyHeldReason !== undefined || history.previous === null
+                  }
+                  reason={
+                    historyHeldReason ??
+                    (history.previous === null
+                      ? "No earlier file in this request's history."
+                      : undefined)
+                  }
+                  onClick={() => moveFileHistory("back")}
+                >
+                  <ArrowLeftIcon aria-hidden />
+                </DisabledReasonButton>
+                <DisabledReasonButton
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Forward in file history"
+                  title="Forward in file history"
+                  disabled={
+                    historyHeldReason !== undefined || history.next === null
+                  }
+                  reason={
+                    historyHeldReason ??
+                    (history.next === null
+                      ? "No later file in this request's history."
+                      : undefined)
+                  }
+                  onClick={() => moveFileHistory("forward")}
+                >
+                  <ArrowRightIcon aria-hidden />
+                </DisabledReasonButton>
+              </span>
               <PrChangedFilesNav
                 files={files}
                 treeFiles={treeFiles}
@@ -639,20 +783,32 @@ export function PrFilesPane({
                     importDisabled={importDisabled}
                   />
                 ) : view.file.kind === "source" ? (
-                  <Suspense
-                    fallback={<DiffPlaceholder message="Loading file…" />}
-                  >
-                    <PrSourceFile
-                      repoPath={view.repo}
+                  snapshot.data === undefined &&
+                  view.repo === repoPath &&
+                  view.file.headSha === blameRev &&
+                  view.file.lens === (lens ?? "origin") ? (
+                    <SourceHeadPreparation
                       path={view.file.path}
-                      headSha={view.file.headSha}
-                      lens={view.file.lens}
-                      statusLabel={view.file.statusLabel}
-                      reportRead={diffSlots.reportRead}
-                      onOpenImport={importLinks.onOpen}
-                      importDisabled={importDisabled}
+                      pending={snapshot.isPending}
+                      paused={snapshot.isPaused}
+                      error={snapshot.isError}
                     />
-                  </Suspense>
+                  ) : (
+                    <Suspense
+                      fallback={<DiffPlaceholder message="Loading file…" />}
+                    >
+                      <PrSourceFile
+                        repoPath={view.repo}
+                        path={view.file.path}
+                        headSha={view.file.headSha}
+                        lens={view.file.lens}
+                        statusLabel={view.file.statusLabel}
+                        reportRead={diffSlots.reportRead}
+                        onOpenImport={importLinks.onOpen}
+                        importDisabled={importDisabled}
+                      />
+                    </Suspense>
+                  )
                 ) : (
                   <PrFileDiffSlot
                     path={view.file.path}
@@ -666,11 +822,13 @@ export function PrFilesPane({
                     dataIsPlaceholder={dataIsPlaceholder}
                     threads={threads}
                     drafts={drafts}
-                    repoPath={repoPath}
-                    lens={lens}
-                    number={number}
+                    repoPath={view.repo}
+                    lens={view.file.lens}
+                    number={view.file.number}
                     previewRev={previewRev}
-                    anchorCommit={blameRev ?? null}
+                    anchorCommit={view.file.headSha}
+                    contextEnabled={comparisonSupported && interactionEnabled}
+                    composerOpen={composerOpen}
                     lineWidget={lineWidget}
                     onQuote={onQuote}
                     onReply={onReply}
@@ -720,6 +878,29 @@ function FullFileLoading({
 function FullFileReadGate({ settled }: { settled: boolean }) {
   useReportPaneSettled(settled);
   return null;
+}
+
+/** A restored source waits for its exact head tree instead of reading the
+ *  underlying changed selection while the file-list cache is cold. */
+function SourceHeadPreparation({
+  path,
+  pending,
+  paused,
+  error,
+}: {
+  path: string;
+  pending: boolean;
+  paused: boolean;
+  error: boolean;
+}) {
+  useReportPaneSettled(!pending || paused);
+  if (error)
+    return (
+      <DiffPlaceholder message="Could not prepare this MR file. Retry loading all files." />
+    );
+  if (paused)
+    return <DiffPlaceholder message={offlinePendingMessage("this file")} />;
+  return <PrFullFileLoading filePath={path} message="Preparing the MR head…" />;
 }
 
 /** Each slot prepares its own captured head; a held source never follows the
@@ -888,6 +1069,8 @@ function PrFileDiffSlot({
   onOpenImport,
   getImportSource,
   importDisabled,
+  contextEnabled,
+  composerOpen,
 }: {
   path: string;
   /** The pull request (lens and number) this slot's view belongs to. */
@@ -908,6 +1091,8 @@ function PrFileDiffSlot({
   previewRev?: string;
   /** The pull request's head, gating the binary-size lookups. */
   anchorCommit?: string | null;
+  contextEnabled: boolean;
+  composerOpen: boolean;
   /** The parent's composer, for its selected file: only a shown slot opens it. */
   lineWidget?: LineWidget;
   reportRead: (read: SlotRead) => void;
@@ -1029,10 +1214,24 @@ function PrFileDiffSlot({
   ]);
 
   const widget = useSlotWidget(lineWidget);
+  const diffContext = usePrDiffContext({
+    repoPath,
+    number,
+    headSha: anchorCommit,
+    lens: lens ?? "origin",
+    path,
+    data,
+    enabled: contextEnabled && !dataIsPlaceholder && !isPending,
+    composerOpen,
+  });
+  const renderData = useMemo(
+    () => (data && diffContext ? { ...data, text: diffContext.patch } : data),
+    [data, diffContext],
+  );
   const content = (
     <DiffContent
       filePath={path}
-      data={data}
+      data={renderData}
       isPending={isPending}
       isError={isError}
       isPaused={isPaused}
@@ -1042,6 +1241,7 @@ function PrFileDiffSlot({
       repoPath={repoPath}
       previewRev={previewRev}
       anchorCommit={anchorCommit}
+      fileContent={diffContext?.content}
       lineAnchors={lineAnchors}
       lineWidget={widget}
     />

@@ -23,9 +23,6 @@ const OTHER_REPO = "C:/repos/lib";
 
 /** Roots whose caches must survive an account change, each for its own reason. */
 const MUST_NOT_RESET = [
-  // Caches a plugin `Update` instance that the update check reuses; a reset
-  // leaks the handle and re-downloads.
-  "app-update",
   // A side-effecting poller, not a read.
   "background-pr-sync",
   // AI provider and agent model lists, keyed by their own credentials.

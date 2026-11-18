@@ -67,6 +67,37 @@ test("team labels default empty and heal saved label lists without duplicates", 
   );
 });
 
+test("watched merge requests default empty and trim and deduplicate saved links", () => {
+  const url = "https://git.example.test/group/repo/-/merge_requests/7";
+  assert.deepEqual(
+    healLoadedSettings(undefined).myWorkWatchedMergeRequests,
+    [],
+  );
+  assert.deepEqual(
+    healLoadedSettings({ myWorkWatchedMergeRequests: null })
+      .myWorkWatchedMergeRequests,
+    [],
+  );
+  assert.deepEqual(
+    healLoadedSettings({
+      myWorkWatchedMergeRequests: [` ${url} `, "", 42, url, null],
+    }).myWorkWatchedMergeRequests,
+    [url],
+  );
+});
+
+test("watched merge request healing preserves saved values without truncating", () => {
+  const urls = Array.from(
+    { length: 101 },
+    (_, index) =>
+      `https://git.example.test/group/repo/-/merge_requests/${index + 1}`,
+  );
+  urls.push("an unreadable saved link");
+  const healed = healLoadedSettings({ myWorkWatchedMergeRequests: urls });
+  assert.deepEqual(healed.myWorkWatchedMergeRequests, urls);
+  assertIdempotent(healLoadedSettings, healed);
+});
+
 // Committed objects as the writers build them: a form draft or a `trimmed ||
 // undefined` alias leaves undefined-valued keys that JSON storage drops.
 const UNDEFINED_TOP = {

@@ -27,8 +27,8 @@ export function loginChange(
 }
 
 /** Top-level key roots whose reads answer as the signed-in forge account. A
- *  POSITIVE scope, so app-global reads that never touch the forge (the update
- *  check's cached handle, pollers, AI model lists, public web reads) stay put. */
+ *  positive scope keeps app-global pollers, AI model lists and public web
+ *  reads intact. */
 export const FORGE_ROOTS: ReadonlySet<string> = new Set([
   "repo",
   "gh-accounts",

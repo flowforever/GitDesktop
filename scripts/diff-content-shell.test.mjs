@@ -1412,7 +1412,7 @@ const PR_ANCHOR_HOPS = {
   DiffViewer: 0,
 };
 
-/** Each PR hop's tag must pass `anchorCommit` a non-empty, defined value. */
+/** Each PR hop passes a defined anchor; a file slot uses its captured head. */
 function prAnchorViolations(files) {
   const problems = [];
   const seen = Object.fromEntries(
@@ -1436,6 +1436,12 @@ function prAnchorViolations(files) {
         const value = flat(raw.slice(open + 1, matchBrace(masked, open)));
         if (value === "" || value === "undefined")
           problems.push(`${where} passes an empty anchorCommit`);
+        else if (
+          path === PR_PARTS &&
+          name === "PrFileDiffSlot" &&
+          value !== "view.file.headSha"
+        )
+          problems.push(`${where} must anchor the slot's captured headSha`);
       }
     }
   }
@@ -1516,7 +1522,24 @@ test("pull request hosts hand every binary-size hop an anchor commit", () => {
     });
   // Negative controls: each hop's attribute dropped, emptied, or a new host.
   for (const [file, from, to, want] of [
-    [PR_PARTS, "anchorCommit={blameRev ?? null}", "", "passes no anchorCommit"],
+    [
+      PR_PARTS,
+      "anchorCommit={view.file.headSha}",
+      "",
+      "passes no anchorCommit",
+    ],
+    [
+      PR_PARTS,
+      "anchorCommit={view.file.headSha}",
+      "anchorCommit={undefined}",
+      "passes an empty anchorCommit",
+    ],
+    [
+      PR_PARTS,
+      "anchorCommit={view.file.headSha}",
+      "anchorCommit={blameRev ?? null}",
+      "must anchor the slot's captured headSha",
+    ],
     [PR_PARTS, "anchorCommit={anchorCommit}", "", "passes no anchorCommit"],
     [PR_COMMIT, "anchorCommit={sha}", "", "passes no anchorCommit"],
     [

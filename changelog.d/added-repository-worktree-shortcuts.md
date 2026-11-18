@@ -1,0 +1,1 @@
+- Open worktrees directly from each repository row, or from a recent list showing the 20 most recently active linked worktrees below the repository actions.

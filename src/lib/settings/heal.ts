@@ -126,6 +126,7 @@ export const EDIT_HISTORY_ORDERS = ["newest-first", "oldest-first"] as const;
 
 export const DEFAULT_SETTINGS: AppSettings = {
   myWorkTeamLabels: [],
+  myWorkWatchedMergeRequests: [],
   ai: {
     provider: "anthropic",
     model: "claude-haiku-4-5",
@@ -506,6 +507,18 @@ export function healLoadedSettings(
       ? [
           ...new Set(
             stored.myWorkTeamLabels
+              .filter((v): v is string => typeof v === "string")
+              .map((v) => v.trim())
+              .filter(Boolean),
+          ),
+        ]
+      : [],
+    myWorkWatchedMergeRequests: Array.isArray(
+      stored?.myWorkWatchedMergeRequests,
+    )
+      ? [
+          ...new Set(
+            stored.myWorkWatchedMergeRequests
               .filter((v): v is string => typeof v === "string")
               .map((v) => v.trim())
               .filter(Boolean),

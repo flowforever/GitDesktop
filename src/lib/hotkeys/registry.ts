@@ -74,8 +74,8 @@ export const ACTIONS = [
     defaultBinding: null,
   },
   {
-    id: "work-authored",
-    label: "Authored by Me",
+    id: "work-watch-mr",
+    label: "Watch merge request",
     category: "Navigation",
     defaultBinding: null,
   },
@@ -1382,6 +1382,18 @@ export const ACTIONS = [
   {
     id: "pr-next-changed-file",
     label: "Next changed file",
+    category: "Pull requests",
+    defaultBinding: null,
+  },
+  {
+    id: "pr-file-back",
+    label: "Back in file history",
+    category: "Pull requests",
+    defaultBinding: null,
+  },
+  {
+    id: "pr-file-forward",
+    label: "Forward in file history",
     category: "Pull requests",
     defaultBinding: null,
   },

@@ -59,12 +59,13 @@ import {
 } from "@/lib/settings/queries";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { RepoWorktreeMenu } from "./RepoWorktreeMenu";
 import {
   FILTER_INPUT_CLASS,
   FILTER_ROW_CLASS,
   LIST_VIEWPORT_CLASS,
 } from "./repo-list-sizes";
-import { useOpenRepoByPath } from "./useOpenRepoByPath";
+import { useOpenRepoByPath, useOpenWorktree } from "./useOpenRepoByPath";
 
 const RECENT_COUNT = 5;
 const OTHER_GROUP = "Other";
@@ -157,12 +158,14 @@ export function RepoList({
   onAliasRepo,
   onRemoveRepo,
   fillHeight = false,
+  showWorktrees = false,
 }: {
   currentPath?: string | null;
   onOpened?: () => void;
   onAliasRepo: (repo: RecentRepo) => void;
   onRemoveRepo: (repo: RecentRepo) => void;
   fillHeight?: boolean;
+  showWorktrees?: boolean;
 }) {
   const settings = useSettings();
   const recents = settings.data?.recentRepos ?? [];
@@ -170,6 +173,7 @@ export function RepoList({
   const persistOwners = usePersistRepoOwners();
   const queryClient = useQueryClient();
   const open = useOpenRepoByPath();
+  const openWorktree = useOpenWorktree();
   const [filter, setFilter] = useState("");
   const [highlight, setHighlight] = useState(-1);
   const [openingPath, setOpeningPath] = useState<string | null>(null);
@@ -369,17 +373,20 @@ export function RepoList({
 
   // The one route into `open`; the guard backs up the disabled rows and escape
   // item while an open is in flight.
-  async function handleOpen(path: string, opts?: { preferMain?: boolean }) {
+  async function handleOpen(
+    path: string,
+    opts?: { preferMain?: boolean; worktreePath?: string },
+  ) {
     if (openingPath !== null) return;
     setOpeningPath(path);
     setFrozenOrder(ordered.map((r) => frozenPathKey(r.path)));
     try {
-      if (
-        !(await open(path, "recent", undefined, {
-          preferMain: opts?.preferMain === true,
-        }))
-      )
-        setFrozenOrder(null);
+      const opened = opts?.worktreePath
+        ? await openWorktree(opts.worktreePath)
+        : await open(path, "recent", undefined, {
+            preferMain: opts?.preferMain === true,
+          });
+      if (!opened) setFrozenOrder(null);
       onOpened?.();
     } finally {
       setOpeningPath(null);
@@ -506,6 +513,7 @@ export function RepoList({
     onOpen: handleOpen,
     providerOf,
     hostOf,
+    showWorktrees,
   };
 
   return (
@@ -615,7 +623,11 @@ interface RepoRowsProps {
   currentPath: string | null;
   highlightedPath: string | null;
   openingPath: string | null;
-  onOpen: (path: string, opts?: { preferMain?: boolean }) => void;
+  onOpen: (
+    path: string,
+    opts?: { preferMain?: boolean; worktreePath?: string },
+  ) => void;
+  showWorktrees: boolean;
   /** Resolves a row's forge provider (shared with the context menu). */
   providerOf: (r: RecentRepo) => ForgeProvider | null;
   /** Resolves a row's origin-remote host, or undefined when local-only. */
@@ -664,6 +676,7 @@ function RepoRow({
   onOpen,
   providerOf,
   hostOf,
+  showWorktrees,
 }: RepoRowsProps & { repo: RecentRepo }) {
   const highlighted = repo.path === highlightedPath;
   // Normalized: the recents write can respell the row's path (case refresh) while
@@ -678,7 +691,12 @@ function RepoRow({
   const forkLabel = repo.forkParent ? `Fork of ${repo.forkParent}` : "Fork";
   // Held while an open is in flight, so an earlier landing's late record write
   // can't reflow the row under the spinner.
-  const hint = useReopenHint(repo.path, currentPath, openingPath !== null);
+  const [worktreeMenuShown, setWorktreeMenuShown] = useState(false);
+  const hint = useReopenHint(
+    repo.path,
+    currentPath,
+    openingPath !== null || worktreeMenuShown,
+  );
 
   return (
     <div
@@ -755,6 +773,15 @@ function RepoRow({
           </span>
         )}
       </button>
+      {showWorktrees && (
+        <RepoWorktreeMenu
+          repoPath={repo.path}
+          repoName={repoDisplayName(repo)}
+          disabled={openingPath !== null}
+          onSelectPath={(path) => onOpen(repo.path, { worktreePath: path })}
+          onShownChange={setWorktreeMenuShown}
+        />
+      )}
       {/* `hidden`, not sr-only: a describedby reference still reads it, and it
           stays out of the listbox's browse-mode content. */}
       {hint && (

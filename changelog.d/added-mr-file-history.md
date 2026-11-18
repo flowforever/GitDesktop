@@ -1,0 +1,1 @@
+- Navigate backward and forward through visited MR files with left/right arrows beside the changed-file controls, restoring the selected file and list scope within each MR tab.

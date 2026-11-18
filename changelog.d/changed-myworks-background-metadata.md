@@ -1,0 +1,1 @@
+- Preload My works category lists in the background, show MR authors, place GitLab-colored labels beside MR titles, and make the active application and category tabs easier to identify.

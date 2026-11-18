@@ -1,12 +1,13 @@
 import type { MyWorkItem } from "./forge-repos";
 
-export type GitLabWorkSection =
-  | "mine"
-  | "authored"
-  | "team"
-  | "mentioned"
-  | "issues";
+export type GitLabWorkSection = "mine" | "team" | "mentioned" | "issues";
+export type MrListStatus = "open" | "merged";
 export type WorkCategory = GitLabWorkSection | "todos";
+
+export interface WatchedMergeRequest {
+  item: MyWorkItem;
+  state: "opened" | "merged" | "closed";
+}
 
 export interface WorkTodo {
   id: string;

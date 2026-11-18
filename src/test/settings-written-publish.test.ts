@@ -91,4 +91,21 @@ describe("saveSettingsMerged", () => {
     expect(stored.editHistoryOrder).toBe("oldest-first");
     expect(committed.diffHideWhitespace).toBe(false);
   });
+
+  it("keeps watched merge requests saved after a bulk settings snapshot was taken", async () => {
+    const watched = "https://git.example.test/group/repo/-/merge_requests/7";
+    disk.settings = { ...base(), myWorkWatchedMergeRequests: [watched] };
+
+    const committed = await saveSettingsMerged({
+      ...base(),
+      myWorkWatchedMergeRequests: [],
+      editHistoryOrder: "oldest-first",
+    });
+
+    expect((disk.settings as AppSettings).myWorkWatchedMergeRequests).toEqual([
+      watched,
+    ]);
+    expect(committed.myWorkWatchedMergeRequests).toEqual([watched]);
+    expect(committed.editHistoryOrder).toBe("oldest-first");
+  });
 });

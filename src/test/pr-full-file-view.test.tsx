@@ -228,7 +228,7 @@ function separatedChanges(lines = 18) {
 }
 
 describe("changed-file full source", () => {
-  it("defaults to Diff without preparing a head or reading file bytes", () => {
+  it("defaults to a partial Diff while preparing only its selected file pair", async () => {
     const view = mountPane();
 
     expect(screen.getByRole("button", { name: "Diff" })).toHaveAttribute(
@@ -240,11 +240,20 @@ describe("changed-file full source", () => {
       "false",
     );
     expect(snapshot).not.toHaveBeenCalled();
-    expect(comparison).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(comparison).toHaveBeenCalledExactlyOnceWith(
+        REPO,
+        7,
+        HEAD,
+        PATH,
+        "origin",
+      ),
+    );
+    expect(bytes).not.toHaveBeenCalled();
     expect(view.props.onSelectPath).not.toHaveBeenCalled();
   });
 
-  it("prepares the exact unfetched MR head before reading only the selected file", async () => {
+  it("prepares the exact MR head before opening Full file and reuses its selected pair", async () => {
     let resolveHead!: (
       files: Awaited<ReturnType<typeof gitPrSnapshotFiles>>,
     ) => void;
@@ -258,7 +267,13 @@ describe("changed-file full source", () => {
     await userEvent.click(screen.getByRole("button", { name: "Full file" }));
 
     expect(snapshot).toHaveBeenCalledExactlyOnceWith(REPO, 7, HEAD, "origin");
-    expect(comparison).not.toHaveBeenCalled();
+    expect(comparison).toHaveBeenCalledExactlyOnceWith(
+      REPO,
+      7,
+      HEAD,
+      PATH,
+      "origin",
+    );
     expect(screen.getByRole("button", { name: "Full file" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -325,13 +340,17 @@ describe("changed-file full source", () => {
         screen.queryByRole("region", { name: `Full comparison of ${PATH}` }),
       ).toBeNull();
       expect(snapshot).toHaveBeenCalledTimes(1);
-      expect(comparison).toHaveBeenCalledExactlyOnceWith(
-        REPO,
-        7,
-        HEAD,
-        PATH,
-        "origin",
-      );
+      expect(comparison).toHaveBeenCalledWith(REPO, 7, HEAD, PATH, "origin");
+      if (next.lens !== "upstream")
+        await waitFor(() =>
+          expect(comparison).toHaveBeenCalledWith(
+            next.repoPath ?? REPO,
+            next.number ?? 7,
+            next.blameRev ?? HEAD,
+            next.effectivePath ?? PATH,
+            "origin",
+          ),
+        );
     },
   );
 
@@ -343,7 +362,13 @@ describe("changed-file full source", () => {
       name: "Retry loading full file",
     });
 
-    expect(comparison).not.toHaveBeenCalled();
+    expect(comparison).toHaveBeenCalledExactlyOnceWith(
+      REPO,
+      7,
+      HEAD,
+      PATH,
+      "origin",
+    );
     expect(screen.getByRole("button", { name: "Diff" })).toBeEnabled();
     await userEvent.click(retry);
     await fullSource();
@@ -429,7 +454,7 @@ describe("changed-file full source", () => {
 
     expect(full).toHaveAttribute("aria-pressed", "false");
     expect(snapshot).not.toHaveBeenCalled();
-    expect(comparison).not.toHaveBeenCalled();
+    expect(comparison).toHaveBeenCalledTimes(1);
     expect(draft.value).toBe("Keep this line-comment draft");
     await waitFor(() => expect(full).toHaveAttribute("aria-disabled", "true"));
     expect(full).toHaveAccessibleDescription(/line comment/);
@@ -484,7 +509,7 @@ describe("changed-file full source", () => {
     expect(full).toHaveAttribute("aria-disabled", "true");
     expect(full).toHaveAccessibleDescription(/line comment/);
     expect(snapshot).not.toHaveBeenCalled();
-    expect(comparison).not.toHaveBeenCalled();
+    expect(comparison).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() =>
@@ -763,7 +788,7 @@ describe("changed-file full source", () => {
 
   it("refreshes request data and the native pair when comparison loading fails", async () => {
     const onRetry = vi.fn();
-    comparison.mockRejectedValueOnce(
+    comparison.mockRejectedValue(
       new Error("MR head moved; refresh the request"),
     );
     mountPane({ onRetry });
@@ -772,11 +797,21 @@ describe("changed-file full source", () => {
       name: "Retry full comparison",
     });
 
+    const readsBeforeRetry = comparison.mock.calls.length;
+    comparison.mockResolvedValue({
+      baseSha: BASE,
+      headSha: HEAD,
+      oldPath: PATH,
+      newPath: PATH,
+      before: fileBytes("prefix\nbefore\nsuffix\n"),
+      after: fileBytes("prefix\nafter\nsuffix\n"),
+      patch: NATIVE_PATCH,
+    });
     await userEvent.click(retry);
     await fullSource();
 
     expect(onRetry).toHaveBeenCalledOnce();
-    expect(comparison).toHaveBeenCalledTimes(2);
+    expect(comparison).toHaveBeenCalledTimes(readsBeforeRetry + 1);
     expect(bytes).not.toHaveBeenCalled();
   });
 

@@ -368,6 +368,37 @@ pub(super) fn my_work_item_from_value(raw: &serde_json::Value, is_pull_request: 
             .and_then(serde_json::Value::as_str)
             .filter(|l| !l.is_empty())
             .map(str::to_string),
+        labels: raw
+            .get("labels")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|label| {
+                label.as_str().or_else(|| {
+                    label.get("name").and_then(serde_json::Value::as_str)
+                })
+            })
+            .filter(|name| !name.trim().is_empty())
+            .map(str::to_string)
+            .collect(),
+        label_colors: raw
+            .get("labels")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|label| {
+                let name = label.get("name")?.as_str()?;
+                if name.trim().is_empty() {
+                    return None;
+                }
+                let color = label.get("color")?.as_str()?;
+                let color = color.strip_prefix('#').unwrap_or(color);
+                if color.len() != 6 || !color.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return None;
+                }
+                Some((name.to_string(), color.to_string()))
+            })
+            .collect(),
     })
 }
 
@@ -12878,6 +12909,8 @@ mod my_work_tests {
                 url: url.into(),
                 updated_at: "2026-09-05T00:00:00.000Z".into(),
                 author_login: None,
+                labels: Vec::new(),
+                label_colors: Default::default(),
             }],
             capped: false,
         }]
@@ -13093,6 +13126,7 @@ mod my_work_tests {
             "web_url": "https://gitlab.com/group/sub/proj/-/merge_requests/42",
             "updated_at": "2026-09-05T23:21:02.987Z",
             "author": {"username": "octo-cat"},
+            "labels": ["bug", "priority::high"],
             "draft": true,
             "source_branch": "feat/x",
             "references": {"full": "group/sub/proj!42"}
@@ -13110,6 +13144,11 @@ mod my_work_tests {
         // GitLab's milliseconds survive the fold to the merge's fixed width —
         // that precision is what breaks a same-second tie at the page cut.
         assert_eq!(item.updated_at, "2026-09-05T23:21:02.987Z");
+        let wire = serde_json::to_value(&item).expect("serializes");
+        assert_eq!(wire["labels"], json!(["bug", "priority::high"]));
+        assert_eq!(wire["authorLogin"], "octo-cat");
+        assert_eq!(wire["isPullRequest"], true);
+        assert_eq!(wire["isDraft"], true);
 
         // The host comes from the item's own URL — a self-managed row keeps its
         // own instance, and its port drops the way every other host spelling does.
@@ -13125,6 +13164,121 @@ mod my_work_tests {
         assert!(!item.is_draft);
         // A missing author is absence, not a fabricated login.
         assert_eq!(item.author_login, None);
+    }
+
+    #[test]
+    fn issue_mapping_preserves_labels_and_author_on_the_wire() {
+        let raw = json!({
+            "iid": 8,
+            "title": "Investigate labels",
+            "web_url": "https://gitlab.acme.dev/group/proj/-/issues/8",
+            "author": {"username": "issue-author"},
+            "labels": ["triage", "team name"],
+            "draft": true
+        });
+        let item = my_work_item_from_value(&raw, false).expect("maps issue");
+        let wire = serde_json::to_value(item).expect("serializes");
+        assert_eq!(wire["labels"], json!(["triage", "team name"]));
+        assert_eq!(wire["authorLogin"], "issue-author");
+        assert_eq!(wire["isPullRequest"], false);
+        assert_eq!(wire["isDraft"], false);
+    }
+
+    #[test]
+    fn detailed_labels_preserve_names_and_colors_for_mrs_and_issues() {
+        for is_pull_request in [true, false] {
+            let raw = json!({
+                "iid": 10,
+                "title": "Keep label colors",
+                "web_url": "https://gitlab.com/g/p/-/merge_requests/10",
+                "author": {"username": "author"},
+                "draft": true,
+                "labels": [
+                    {"name": "bug", "color": "#aAbB12", "text_color": "#FFFFFF"},
+                    {"name": "needs triage", "color": "0011AA"},
+                    "legacy"
+                ]
+            });
+            let item =
+                my_work_item_from_value(&raw, is_pull_request).expect("maps detailed labels");
+            let wire = serde_json::to_value(item).expect("serializes");
+            assert_eq!(wire["labels"], json!(["bug", "needs triage", "legacy"]));
+            assert_eq!(
+                wire["labelColors"],
+                json!({"bug": "aAbB12", "needs triage": "0011AA"})
+            );
+            assert_eq!(wire["authorLogin"], "author");
+            assert_eq!(wire["isPullRequest"], is_pull_request);
+            assert_eq!(wire["isDraft"], is_pull_request);
+        }
+    }
+
+    #[test]
+    fn invalid_colors_keep_label_names_without_fabricating_colors() {
+        let raw = json!({
+            "iid": 11,
+            "title": "Keep labels with unusable colors",
+            "web_url": "https://gitlab.com/g/p/-/issues/11",
+            "labels": [
+                {"name": "blank", "color": ""},
+                {"name": "short", "color": "#abc"},
+                {"name": "double hash", "color": "##aabbcc"},
+                {"name": "nonhex", "color": "GGHHII"},
+                {"name": "null", "color": null},
+                {"name": "number", "color": 123456},
+                {"name": "spaces", "color": " #aabbcc"},
+                {"name": "missing"},
+                {"name": "valid", "color": "#123abc"},
+                {"name": "", "color": "#123456"},
+                {"name": "  ", "color": "#123456"},
+                {"color": "#123456"}
+            ]
+        });
+        let item = my_work_item_from_value(&raw, false).expect("maps invalid colors");
+        let wire = serde_json::to_value(item).expect("serializes");
+        assert_eq!(
+            wire["labels"],
+            json!([
+                "blank", "short", "double hash", "nonhex", "null", "number", "spaces", "missing", "valid"
+            ])
+        );
+        assert_eq!(wire["labelColors"], json!({"valid": "123abc"}));
+    }
+
+    #[test]
+    fn missing_or_malformed_labels_keep_the_item_and_valid_label_names() {
+        let base = json!({
+            "iid": 9,
+            "title": "Keep this item",
+            "web_url": "https://gitlab.com/g/p/-/merge_requests/9",
+            "author": {"username": "author"}
+        });
+        let item = my_work_item_from_value(&base, true).expect("maps without labels");
+        let wire = serde_json::to_value(item).expect("serializes");
+        assert_eq!(wire["labels"], json!([]));
+        assert_eq!(wire["labelColors"], json!({}));
+        assert_eq!(wire["authorLogin"], "author");
+
+        for labels in [json!(null), json!("bug"), json!({"name": "bug"}), json!(7)] {
+            let mut raw = base.clone();
+            raw["labels"] = labels;
+            let item = my_work_item_from_value(&raw, true).expect("maps malformed labels");
+            let wire = serde_json::to_value(item).expect("serializes");
+            assert_eq!(wire["labels"], json!([]));
+            assert_eq!(wire["labelColors"], json!({}));
+            assert_eq!(wire["authorLogin"], "author");
+        }
+
+        let mut raw = base;
+        raw["labels"] = json!([
+            "bug", "", "  ", null, 3, false, {}, {"name": "enhancement"},
+            {"name": ""}, {"name": null}, {"name": 8}, ["nested"]
+        ]);
+        let item = my_work_item_from_value(&raw, true).expect("maps mixed labels");
+        let wire = serde_json::to_value(item).expect("serializes");
+        assert_eq!(wire["labels"], json!(["bug", "enhancement"]));
+        assert_eq!(wire["labelColors"], json!({}));
+        assert_eq!(wire["authorLogin"], "author");
     }
 
     /// One malformed record must never blank the page: each is judged on its own.

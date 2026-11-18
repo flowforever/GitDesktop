@@ -1,5 +1,11 @@
+import type { PrSnapshotComparison } from "../../lib/git/api/pr-snapshot.ts";
 import type { FileBytes } from "../../lib/git/api/workingtree.ts";
+import {
+  sectionFilePath,
+  sectionOldFilePath,
+} from "../../lib/git/diff-split.ts";
 import { parseHunks } from "../../lib/git/hunks.ts";
+import { FULL_OID_RE } from "../../lib/git/oid.ts";
 import type { FileDiff } from "../../lib/git/types/workingtree.ts";
 import { DIFF_MAX_LINE_CHARS } from "../diff/cap-diff.ts";
 
@@ -15,11 +21,118 @@ export type FullContextRefusal =
 type Unavailable = { kind: "unavailable"; reason: FullContextRefusal };
 type Line = { text: string; terminated: boolean };
 type Row = { prefix: " " | "+" | "-"; text: string; noNewline: boolean };
+type HunkRange = {
+  oldIndex: number;
+  oldCount: number;
+  newIndex: number;
+  newCount: number;
+};
+type SnapshotContext =
+  | Exclude<ReturnType<typeof buildPrFullContext>, { kind: "ready" }>
+  | (Extract<ReturnType<typeof buildPrFullContext>, { kind: "ready" }> & {
+      /** Display text; a supplied partial patch keeps its hunk boundaries. */
+      patch: string;
+    });
 
 const refuse = (reason: FullContextRefusal): Unavailable => ({
   kind: "unavailable",
   reason,
 });
+
+function hunkRange(header: string): HunkRange | null {
+  const range = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/.exec(
+    header,
+  );
+  if (range === null) return null;
+  const oldStart = Number(range[1]);
+  const oldCount = range[2] === undefined ? 1 : Number(range[2]);
+  const newStart = Number(range[3]);
+  const newCount = range[4] === undefined ? 1 : Number(range[4]);
+  if (
+    ![oldStart, oldCount, newStart, newCount].every(Number.isSafeInteger) ||
+    (oldCount > 0 && oldStart === 0) ||
+    (newCount > 0 && newStart === 0)
+  )
+    return null;
+  return {
+    oldIndex: oldCount === 0 ? oldStart : oldStart - 1,
+    oldCount,
+    newIndex: newCount === 0 ? newStart : newStart - 1,
+    newCount,
+  };
+}
+
+/** GitLab can omit the space on an empty context row. Restore only that prefix,
+ *  under the hunk's remaining counts and exact matching bytes on BOTH sides. */
+function canonicalPartialPatch(
+  patch: string,
+  before: string,
+  after: string,
+): string | Unavailable {
+  if (
+    patch.length > MAX_PATCH_CHARS ||
+    tooManyLines(patch, MAX_ROWS * 2 + 64) ||
+    before.length + after.length > FULL_FILE_MAX_BYTES ||
+    tooManyLines(before) ||
+    tooManyLines(after)
+  )
+    return refuse("too-large");
+  const oldLines = lines(before);
+  const newLines = lines(after);
+  const records = patch.split("\n");
+  let normalized: string[] | undefined;
+  let inHunk = false;
+  let oldAt = 0;
+  let newAt = 0;
+  let oldRemaining = 0;
+  let newRemaining = 0;
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (record.startsWith("@@")) {
+      if (oldRemaining !== 0 || newRemaining !== 0) return refuse("invalid");
+      const range = hunkRange(record);
+      if (
+        !range ||
+        range.oldIndex < oldAt ||
+        range.newIndex < newAt ||
+        range.oldIndex + range.oldCount > oldLines.length ||
+        range.newIndex + range.newCount > newLines.length
+      )
+        return refuse("invalid");
+      oldAt = range.oldIndex;
+      newAt = range.newIndex;
+      oldRemaining = range.oldCount;
+      newRemaining = range.newCount;
+      inHunk = true;
+      continue;
+    }
+    // The final split segment is a delimiter, never a context record.
+    if (!inHunk || (index === records.length - 1 && record === "")) continue;
+    if (record === "\\ No newline at end of file") continue;
+    let prefix = record[0];
+    if (record === "" || record === "\r") {
+      if (oldRemaining <= 0 || newRemaining <= 0) return refuse("invalid");
+      if (oldLines[oldAt]?.text !== record || newLines[newAt]?.text !== record)
+        return refuse("mismatch");
+      normalized ??= [...records];
+      normalized[index] = ` ${record}`;
+      prefix = " ";
+    }
+    if (prefix !== " " && prefix !== "+" && prefix !== "-")
+      return refuse("invalid");
+    if (prefix !== "+") {
+      oldAt++;
+      oldRemaining--;
+    }
+    if (prefix !== "-") {
+      newAt++;
+      newRemaining--;
+    }
+    if (oldRemaining < 0 || newRemaining < 0) return refuse("invalid");
+  }
+  if (oldRemaining !== 0 || newRemaining !== 0) return refuse("invalid");
+  return normalized?.join("\n") ?? patch;
+}
 
 /** Strict decoding keeps the BOM and CR bytes that native git compares. */
 export function decodePrFullFile(
@@ -46,6 +159,76 @@ export function decodePrFullFile(
   } catch {
     return refuse("binary");
   }
+}
+
+function validBytes(value: unknown): boolean {
+  if (value === null) return true;
+  if (typeof value !== "object") return false;
+  const data = value as Record<string, unknown>;
+  return (
+    (data.base64 === null || typeof data.base64 === "string") &&
+    (data.mime === null || typeof data.mime === "string") &&
+    typeof data.tooLarge === "boolean" &&
+    (data.size === null ||
+      (typeof data.size === "number" &&
+        Number.isFinite(data.size) &&
+        data.size >= 0))
+  );
+}
+
+/** The same pinned pair backs Full file and collapsed Diff context. Supplying
+ *  a displayed patch additionally proves its rows and every omitted gap. */
+export function buildPrSnapshotContext(
+  data: PrSnapshotComparison,
+  path: string,
+  headSha: string,
+  displayedPatch?: string,
+): SnapshotContext {
+  if (
+    !data ||
+    typeof data.headSha !== "string" ||
+    typeof data.baseSha !== "string" ||
+    !FULL_OID_RE.test(data.baseSha) ||
+    data.headSha.toLowerCase() !== headSha.toLowerCase() ||
+    (data.oldPath !== null && typeof data.oldPath !== "string") ||
+    (data.newPath !== null && typeof data.newPath !== "string") ||
+    (data.patch !== null && typeof data.patch !== "string") ||
+    !validBytes(data.before) ||
+    !validBytes(data.after)
+  )
+    return refuse("invalid");
+  if (
+    displayedPatch !== undefined &&
+    (sectionFilePath(displayedPatch) !== (data.newPath ?? data.oldPath) ||
+      sectionOldFilePath(displayedPatch) !== (data.oldPath ?? undefined))
+  )
+    return refuse("mismatch");
+  const before = decodePrFullFile(data.before);
+  if (before.kind === "unavailable") return before;
+  const after = decodePrFullFile(data.after);
+  if (after.kind === "unavailable") return after;
+  const patch =
+    displayedPatch !== undefined && before.text !== null && after.text !== null
+      ? canonicalPartialPatch(displayedPatch, before.text, after.text)
+      : (displayedPatch ?? data.patch);
+  if (patch !== null && typeof patch !== "string") return patch;
+  const result = buildPrFullContext({
+    path,
+    oldPath: data.oldPath,
+    newPath: data.newPath,
+    before: before.text,
+    after: after.text,
+    patch,
+  });
+  return result.kind === "ready"
+    ? {
+        ...result,
+        patch:
+          displayedPatch !== undefined && patch !== null
+            ? patch
+            : result.data.text,
+      }
+    : result;
 }
 
 function tooManyLines(text: string, limit = MAX_ROWS): boolean {
@@ -167,22 +350,9 @@ export function buildPrFullContext({
     )
       return refuse("invalid");
     for (const hunk of parsed.hunks) {
-      const range = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/.exec(
-        hunk.header,
-      );
+      const range = hunkRange(hunk.header);
       if (range === null) return refuse("invalid");
-      const oldStart = Number(range[1]);
-      const oldCount = range[2] === undefined ? 1 : Number(range[2]);
-      const newStart = Number(range[3]);
-      const newCount = range[4] === undefined ? 1 : Number(range[4]);
-      if (
-        ![oldStart, oldCount, newStart, newCount].every(Number.isSafeInteger) ||
-        (oldCount > 0 && oldStart === 0) ||
-        (newCount > 0 && newStart === 0)
-      )
-        return refuse("invalid");
-      const oldIndex = oldCount === 0 ? oldStart : oldStart - 1;
-      const newIndex = newCount === 0 ? newStart : newStart - 1;
+      const { oldIndex, oldCount, newIndex, newCount } = range;
       if (
         oldIndex < oldAt ||
         newIndex < newAt ||

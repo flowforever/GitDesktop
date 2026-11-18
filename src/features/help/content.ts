@@ -119,6 +119,13 @@ the actions follow the list. Opening a repository creates its own application ta
 opening the same checkout again selects its existing tab. My works, Repositories
 and your MR tabs remain available as you switch between repositories.
 
+**Recent worktrees** below the action panel lists up to 20 linked worktrees across
+your known repositories, newest Git activity first. It scrolls within the remaining
+space. Each repository row also has a **Worktrees** menu. Select a worktree in
+either place to open that exact checkout in its own tab; reopening it selects the
+existing tab. Main workspaces and agent-session worktrees stay out of the recent
+worktree list. The list is read-only and does not prune worktrees.
+
 ## Switching repos
 
 The repository name in the header is a **switcher** ({{kbd:show-repositories}}). Click it
@@ -279,24 +286,40 @@ repository. Open it at any time with {{kbd:open-my-work}} or the command palette
 Use **Repositories** to open the repository list, clone a project or create a repo.
 **Settings** and **Help** remain available from the home header.
 
-## Six categories
+## Five categories
 
-- **My Merge Requests** is the default: open MRs assigned to you or listing you as a reviewer.
-- **Authored by Me** lists open MRs you created.
-- **Team Merge Requests** finds open MRs matching any configured label across all
+- **My Merge Requests** is the default: MRs assigned to you, listing you as a
+  reviewer, created by you or added with **Watch MR**. Each MR appears once.
+- **Team Merge Requests** finds MRs matching any configured label across all
   accessible projects. Choose **Configure labels** and enter up to six names, one
   per line. The labels are shared across your GitLab instances and saved locally.
-- **Mentioned Me** lists open MRs with retained GitLab mention records. It includes
+- **Mentioned Me** lists MRs with retained GitLab mention records. It includes
   completed mention records and excludes MRs currently assigned to you or listing
   you as a reviewer.
 - **Todos** shows pending GitLab to-dos. **Done** completes that one item; opening
   its target leaves the to-do pending.
 - **Issues** combines open issues you created and open issues assigned to you.
 
-Only the selected category loads. The filter narrows the loaded title, repository
-or number. Use the arrow keys and {{key:Enter}} in the MR filter to open a row.
-Todo rows also support arrow-key navigation. **Refresh** reloads the current
-category. A note appears when a page limit or an unreachable instance may leave
+The lists preload in the background while you use any screen; **Team Merge Requests**
+starts once its labels are configured. Switching categories shows the cached page
+while fresh data loads. Labels follow the MR title on the same line, using their
+GitLab background colors with readable text. The author appears below. Todo targets
+show metadata when available. The current application tab has an accent highlight,
+while category tabs use a subtle neutral selection.
+
+Choose **Open / Merged** before the search field to filter any MR category. Both
+states preload; Issues and Todos keep their own scopes.
+
+**Watch MR** accepts a link from a GitLab host you are signed in to. It saves the
+watch locally and includes that MR in My Merge Requests, even when you are not
+assigned or reviewing it. Merged requests remain in Merged; Closed requests leave
+the list on refresh. Watched lists refresh every minute while the app is active.
+Open **Watched merge requests** in the dialog to stop watching a saved link.
+
+The filter narrows the loaded title, repository or number. Use the arrow keys and
+{{key:Enter}} in the MR filter to open a row. Todo rows also support arrow-key
+navigation. **Refresh** reloads the background work lists. A note appears when a
+page limit or an unreachable instance may leave
 items missing. Existing rows remain available if a refresh fails.
 
 ## MR detail tabs
@@ -1588,7 +1611,11 @@ use the arrow keys to navigate, and scroll horizontally to read complete file na
 The file-scope icon at the top of the tree switches between the request's changed
 files and **All files**; hover it to see the current scope. The adjacent up/down
 arrows move between changed files, skipping unchanged source files. The tree
-expands the selected file's parents and scrolls it into view.
+expands the selected file's parents and scrolls it into view. Left/right arrows
+beside those controls move back and forward through visited files, restoring the
+file-list scope and revealing the selected file. Each MR tab keeps its own
+history when you leave Files and return. Selecting another file after going back
+starts a new history branch.
 Switching scope starts with folders collapsed; expanding one folder shows its
 immediate children. Select a file to read its content.
 All files reads the complete tree at the request's head commit, fetching missing
@@ -1600,7 +1627,10 @@ If the changes list is incomplete, the marker says **Not in loaded changes**.
 Images have a preview, binary files have a notice, and large text uses a plain source view.
 For a changed GitLab MR file, **Diff / Full file** switches between its patch and a
 complete before-and-after comparison, keeping unchanged lines and change
-highlights even when both versions are identical. A visible loading message
+highlights even when both versions are identical. In Diff view, click the context
+arrows above, between or below change blocks to reveal nearby code. These controls
+share the Local Changes diff renderer and use the selected MR file's pinned
+before-and-after versions; other files stay unloaded. A visible loading message
 tracks preparation and version reads. Finish or cancel an open line-comment draft before switching to
 Full file. Both file-scope and file-view toggles are also available from the
 command palette while Files is active. **Before / After** labels share the top
@@ -4364,8 +4394,8 @@ where there's an equivalent.`,
   },
   {
     id: "settings",
-    label: "Settings & updates",
-    body: `# Settings & updates
+    label: "Settings",
+    body: `# Settings
 
 Open **Settings** from the header gear (or {{kbd:open-settings}}). Leaving Settings with
 unsaved changes asks to save or discard first, whether you leave through Back,
@@ -4511,13 +4541,8 @@ Sections:
 
 ## Staying up to date
 
-GitDesktop updates itself from GitHub Releases. It checks for a newer version on launch
-and roughly every six hours in the background while the app stays open (you can turn these
-automatic checks off in **Settings → Updates**). When an update is waiting it shows a
-toast, a dot on the **Settings** gear, and an **Install & restart** banner in
-**Settings → Updates** — but it only ever installs **on your consent**, never silently.
-If changes made offline are still waiting to send, GitDesktop asks before the restart
-discards them. Updates are cryptographically signed and verified by the app. You can also
-check anytime with **Check for updates now**.`,
+Install newer versions using your package manager or the installer from GitHub Releases.
+**Settings → About** shows the installed app and component versions. **What's new**
+shows the changelog for the version you have installed.`,
   },
 ];

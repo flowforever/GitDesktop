@@ -3,6 +3,7 @@ import {
   ArrowsClockwiseIcon,
   CircleDashedIcon,
   CircleNotchIcon,
+  EyeIcon,
   FolderPlusIcon,
   GitPullRequestIcon,
 } from "@phosphor-icons/react";
@@ -32,6 +33,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   OFFLINE_ROWS_NOTICE,
   offlinePendingMessage,
@@ -48,6 +50,7 @@ import { normPath } from "@/lib/git/path";
 import {
   useCompleteWorkTodo,
   useGitLabWorkAccounts,
+  useGitLabWorkCategoryCounts,
   useGitLabWorkHosts,
   useGitLabWorkItems,
   useGitLabWorkTodos,
@@ -59,7 +62,7 @@ import {
   providerLabel,
   type RepoInfo,
 } from "@/lib/git/types";
-import type { WorkCategory } from "@/lib/git/types/gitlab-work";
+import type { MrListStatus, WorkCategory } from "@/lib/git/types/gitlab-work";
 import { listUserWorktrees, type UserWorktree } from "@/lib/git/worktree";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
@@ -82,6 +85,8 @@ import {
   myWorkOptionId,
 } from "./mywork-utils";
 import { TeamLabelsDialog } from "./TeamLabelsDialog";
+import { WatchMrDialog } from "./WatchMrDialog";
+import { WorkItemAuthor, WorkItemLabels } from "./WorkItemMetadata";
 import { WorkTodosList } from "./WorkTodosList";
 import { WORK_CATEGORIES } from "./work-categories";
 import {
@@ -463,11 +468,14 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
   const category = useUiStore((s) => s.workCategory);
   const setCategory = useUiStore((s) => s.setWorkCategory);
   const [labelsOpen, setLabelsOpen] = useState(false);
+  const [watchOpen, setWatchOpen] = useState(false);
+  const [mrStatus, setMrStatus] = useState<MrListStatus>("open");
   const [connectItem, setConnectItem] = useState<MyWorkItem | null>(null);
   useHotkeyAction("work-configure-labels", () => {
     setCategory("team");
     setLabelsOpen(true);
   });
+  useHotkeyAction("work-watch-mr", () => setWatchOpen(true));
   const openPr = useUiStore((s) => s.openPr);
   const openIssue = useUiStore((s) => s.openIssue);
   const [filter, setFilter] = useState("");
@@ -503,10 +511,18 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
   const gitlabOn = sources.data?.gitlab === true;
   const accounts = useGitLabWorkAccounts(active && gitlabOn);
   const teamLabels = settings.data?.myWorkTeamLabels ?? NO_LABELS;
+  const watchedUrls = settings.data?.myWorkWatchedMergeRequests ?? NO_LABELS;
+  const categoryCounts = useGitLabWorkCategoryCounts(
+    teamLabels,
+    mrStatus,
+    watchedUrls,
+  );
   const gitlab = useGitLabWorkItems(
     category === "todos" ? "mine" : category,
     teamLabels,
     active && gitlabOn && category !== "todos",
+    mrStatus,
+    watchedUrls,
   );
   const todos = useGitLabWorkTodos(active && gitlabOn && category === "todos");
   const completeTodo = useCompleteWorkTodo();
@@ -624,8 +640,7 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
   function refresh() {
     void sources.refetch();
     if (gitlabOn) void accounts.refetch();
-    for (const leg of enabledLegs) void leg.query.refetch();
-    if (category === "todos" && gitlabOn) void todos.refetch();
+    void queryClient.invalidateQueries({ queryKey: ["gitlab-work"] });
   }
 
   // Esc closes the inbox. Guarded so Base UI popups (which mark the event
@@ -973,11 +988,15 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
           </span>
         )}
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           className="ml-auto"
-          onClick={openHelp}
+          onClick={() => setWatchOpen(true)}
         >
+          <EyeIcon aria-hidden />
+          Watch MR
+        </Button>
+        <Button variant="ghost" size="sm" onClick={openHelp}>
           Help
         </Button>
         <Button variant="ghost" size="sm" onClick={() => openSettings()}>
@@ -1003,19 +1022,13 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
         >
           <TabsList>
             {WORK_CATEGORIES.map(({ value, label }) => (
-              <TabsTrigger key={value} value={value}>
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="data-active:border-border data-active:bg-background data-active:text-foreground data-active:font-medium dark:data-active:border-border dark:data-active:bg-background/70 dark:data-active:text-foreground"
+              >
                 {label}
-                {value === category && (
-                  <Count
-                    n={
-                      category === "todos"
-                        ? (todos.data?.items.length ?? null)
-                        : showCounts
-                          ? items.length
-                          : null
-                    }
-                  />
-                )}
+                <Count n={gitlabOn ? categoryCounts[value] : null} />
               </TabsTrigger>
             ))}
           </TabsList>
@@ -1030,29 +1043,51 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
             {teamLabels.length > 0 ? ` (${teamLabels.length})` : ""}
           </Button>
         )}
-        <Input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          onKeyDown={onInputKeyDown}
-          placeholder="Filter by title, repository, or number"
-          aria-label="Filter your work"
-          role={category === "todos" ? undefined : "combobox"}
-          aria-expanded={
-            category === "todos" ? undefined : interactive.length > 0
-          }
-          // Same predicate as aria-expanded, and the same set the list renders:
-          // the listbox only mounts in the list branch, so pointing at its id
-          // from any other state — including the grace window's skeletons —
-          // would reference a node that isn't there.
-          aria-controls={
-            category !== "todos" && interactive.length > 0
-              ? MY_WORK_LISTBOX_ID
-              : undefined
-          }
-          aria-autocomplete={category === "todos" ? undefined : "list"}
-          aria-activedescendant={category === "todos" ? undefined : activeId}
-          className="h-8 min-w-40 flex-1"
-        />
+        <div className="flex min-w-72 flex-1 items-center gap-2">
+          {category !== "todos" && category !== "issues" && (
+            <ToggleGroup
+              aria-label="MR status"
+              variant="outline"
+              size="sm"
+              spacing={0}
+              value={[mrStatus]}
+              onValueChange={(next) => {
+                if (next[0] === "open" || next[0] === "merged")
+                  setMrStatus(next[0]);
+              }}
+            >
+              <ToggleGroupItem value="open" className="h-8">
+                Open
+              </ToggleGroupItem>
+              <ToggleGroupItem value="merged" className="h-8">
+                Merged
+              </ToggleGroupItem>
+            </ToggleGroup>
+          )}
+          <Input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={onInputKeyDown}
+            placeholder="Filter by title, repository, or number"
+            aria-label="Filter your work"
+            role={category === "todos" ? undefined : "combobox"}
+            aria-expanded={
+              category === "todos" ? undefined : interactive.length > 0
+            }
+            // Same predicate as aria-expanded, and the same set the list renders:
+            // the listbox only mounts in the list branch, so pointing at its id
+            // from any other state — including the grace window's skeletons —
+            // would reference a node that isn't there.
+            aria-controls={
+              category !== "todos" && interactive.length > 0
+                ? MY_WORK_LISTBOX_ID
+                : undefined
+            }
+            aria-autocomplete={category === "todos" ? undefined : "list"}
+            aria-activedescendant={category === "todos" ? undefined : activeId}
+            className="h-8 min-w-40 flex-1"
+          />
+        </div>
       </div>
 
       {category === "todos" ? (
@@ -1110,6 +1145,9 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
           labels={teamLabels}
           onClose={() => setLabelsOpen(false)}
         />
+      )}
+      {watchOpen && (
+        <WatchMrDialog open={watchOpen} onOpenChange={setWatchOpen} />
       )}
       {connectItem && (
         <ConnectWorkRepoDialog
@@ -1266,7 +1304,7 @@ function MyWorkList({
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 33,
+    estimateSize: () => 58,
     overscan: 12,
   });
 
@@ -1450,8 +1488,7 @@ function CapNote() {
   );
 }
 
-/** One inbox row — a `role="option"` in the listbox. Single line: type glyph,
- *  number, title, repository, and when it last moved. */
+/** One inbox row: labels follow the title; author and age occupy the second line. */
 function MyWorkRow({
   item,
   local,
@@ -1504,65 +1541,76 @@ function MyWorkRow({
         role="img"
         aria-label={typeLabel}
         title={typeLabel}
-        className="flex shrink-0 items-center text-muted-foreground"
+        className="mt-0.5 flex shrink-0 self-start items-center text-muted-foreground"
       >
         <Icon className="size-3.5" aria-hidden />
       </span>
-      <span className="shrink-0 tabular-nums text-muted-foreground">
-        {item.isPullRequest ? "!" : "#"}
-        {item.number}
+      <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 tabular-nums text-muted-foreground">
+            {item.isPullRequest ? "!" : "#"}
+            {item.number}
+          </span>
+          <span
+            className="min-w-0 truncate font-medium"
+            onMouseEnter={clipTitleFromText}
+          >
+            {item.title}
+          </span>
+          <WorkItemLabels
+            item={item}
+            className="max-w-[60%] shrink-0 flex-nowrap overflow-hidden"
+          />
+          {item.isDraft && (
+            <Badge variant="secondary" className="h-4 shrink-0">
+              Draft
+            </Badge>
+          )}
+        </span>
+        <WorkItemAuthor login={item.authorLogin} />
       </span>
-      <span
-        className="min-w-0 flex-1 truncate"
-        onMouseEnter={clipTitleFromText}
-      >
-        {item.title}
-      </span>
-      {item.isDraft && (
-        <Badge variant="secondary" className="h-4">
-          Draft
-        </Badge>
-      )}
-      {/* The glyph is decorative, so the forge rides the row's ACCESSIBLE text,
+      <span className="flex max-w-[32%] shrink-0 flex-col items-end gap-1.5 text-[11px] text-muted-foreground sm:max-w-64">
+        {/* The glyph is decorative, so the forge rides the row's ACCESSIBLE text,
           announced after the name (rows are scanned by repo): one name can live
           on several forges, and a shape says nothing to a screen reader.
           `sr-only` is absolutely positioned, so the name's truncation is
           untouched. Kept on ↗ rows too — their hint names the HOST, which on a
           self-managed server doesn't reveal the forge. */}
-      <span className="flex max-w-56 shrink-0 items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={item.provider} className="size-3 shrink-0" />
-        <span className="min-w-0 truncate" onMouseEnter={clipTitleFromText}>
-          {item.repoFullName}
-        </span>
-        <span className="sr-only">, {providerLabel(item.provider)}</span>
-      </span>
-      {!local && (
-        <span
-          role="img"
-          aria-label={browserLabel}
-          title={browserLabel}
-          className="flex shrink-0 items-center text-muted-foreground"
-        >
-          {item.isPullRequest ? (
-            <FolderPlusIcon className="size-3" aria-hidden />
-          ) : (
-            <ArrowSquareOutIcon className="size-3" aria-hidden />
+        <span className="flex min-w-0 max-w-full items-center gap-1">
+          <ProviderIcon provider={item.provider} className="size-3 shrink-0" />
+          <span className="min-w-0 truncate" onMouseEnter={clipTitleFromText}>
+            {item.repoFullName}
+          </span>
+          <span className="sr-only">, {providerLabel(item.provider)}</span>
+          {!local && (
+            <span
+              role="img"
+              aria-label={browserLabel}
+              title={browserLabel}
+              className="flex shrink-0 items-center text-muted-foreground"
+            >
+              {item.isPullRequest ? (
+                <FolderPlusIcon className="size-3" aria-hidden />
+              ) : (
+                <ArrowSquareOutIcon className="size-3" aria-hidden />
+              )}
+            </span>
+          )}
+          {pending && (
+            <span
+              className="flex shrink-0 items-center text-muted-foreground"
+              aria-hidden
+            >
+              <CircleNotchIcon className="size-3.5 animate-spin" />
+            </span>
           )}
         </span>
-      )}
-      {pending && (
-        <span
-          className="flex shrink-0 items-center text-muted-foreground"
-          aria-hidden
-        >
-          <CircleNotchIcon className="size-3.5 animate-spin" />
-        </span>
-      )}
-      {parseableDate(item.updatedAt) && (
-        <span className="shrink-0 text-muted-foreground">
-          <RelativeTime date={item.updatedAt} />
-        </span>
-      )}
+        {parseableDate(item.updatedAt) && (
+          <span className="shrink-0 text-muted-foreground">
+            <RelativeTime date={item.updatedAt} />
+          </span>
+        )}
+      </span>
     </button>
   );
 }

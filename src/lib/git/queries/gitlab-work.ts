@@ -1,17 +1,83 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import {
+  type QueryClient,
+  queryOptions,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useEffect } from "react";
 import { useMutation } from "@/lib/started-mutation";
 import { COLD_START_NO_GH } from "@/lib/test-mode";
 import * as api from "../api/gitlab-work";
-import type { GitLabWorkSection, WorkTodoPage } from "../types/gitlab-work";
+import type {
+  GitLabWorkSection,
+  MrListStatus,
+  WorkCategory,
+  WorkTodoPage,
+} from "../types/gitlab-work";
 
 export const GITLAB_WORK_KEY = ["gitlab-work"] as const;
 export const GITLAB_WORK_HOSTS_KEY = ["gitlab-work-hosts"] as const;
 export const GITLAB_WORK_ACCOUNTS_KEY = ["gitlab-work-accounts"] as const;
 
+const WORK_SECTIONS = [
+  "mine",
+  "team",
+  "mentioned",
+  "issues",
+] as const satisfies readonly GitLabWorkSection[];
+const MR_STATUSES = ["open", "merged"] as const;
+// The app-wide preloader and visible list share one account-change baseline.
+const accountBaselines = new WeakMap<QueryClient, Map<string, string | null>>();
+
+/** This owner lives outside Activity panels, so navigation never pauses list loading. */
+export function useGitLabWorkBackground(
+  enabled: boolean,
+  labels: readonly string[],
+  watchedUrls: readonly string[] = [],
+) {
+  const hosts = useGitLabWorkHosts(enabled);
+  const connected = enabled && (hosts.data?.length ?? 0) > 0;
+  useGitLabWorkAccounts(connected);
+  useQueries({
+    queries: WORK_SECTIONS.flatMap((section) =>
+      (section === "issues" ? ["open" as const] : MR_STATUSES).map(
+        (status) => ({
+          ...gitlabWorkItemsOptions(section, labels, status, watchedUrls),
+          enabled: connected && (section !== "team" || labels.length > 0),
+        }),
+      ),
+    ),
+  });
+  useGitLabWorkTodos(connected);
+}
+
+/** Disabled observers read warmed counts without starting a second set of requests. */
+export function useGitLabWorkCategoryCounts(
+  labels: readonly string[],
+  status: MrListStatus = "open",
+  watchedUrls: readonly string[] = [],
+) {
+  const pages = useQueries({
+    queries: WORK_SECTIONS.map((section) => ({
+      ...gitlabWorkItemsOptions(section, labels, status, watchedUrls),
+      enabled: false,
+    })),
+  });
+  const todos = useGitLabWorkTodos(false);
+  return Object.fromEntries([
+    ...WORK_SECTIONS.map((section, index) => [
+      section,
+      section === "team" && labels.length === 0
+        ? null
+        : (pages[index].data?.items.length ?? null),
+    ]),
+    ["todos", todos.data?.items.length ?? null],
+  ]) as Record<WorkCategory, number | null>;
+}
+
 export function useGitLabWorkAccounts(enabled: boolean) {
   const client = useQueryClient();
-  const previous = useRef<Map<string, string | null> | null>(null);
   const query = useQuery({
     queryKey: GITLAB_WORK_ACCOUNTS_KEY,
     queryFn: api.gitlabWorkAccounts,
@@ -21,19 +87,18 @@ export function useGitLabWorkAccounts(enabled: boolean) {
   });
   useEffect(() => {
     if (!query.data) return;
+    const previous = accountBaselines.get(client);
     const next = new Map(
       query.data.map((account) => [
         account.host,
-        account.login ?? previous.current?.get(account.host) ?? null,
+        account.login ?? previous?.get(account.host) ?? null,
       ]),
     );
     const changed =
-      previous.current !== null &&
-      (previous.current.size !== next.size ||
-        [...next].some(
-          ([host, login]) => previous.current?.get(host) !== login,
-        ));
-    previous.current = next;
+      previous !== undefined &&
+      (previous.size !== next.size ||
+        [...next].some(([host, login]) => previous.get(host) !== login));
+    accountBaselines.set(client, next);
     if (changed) void client.resetQueries({ queryKey: GITLAB_WORK_KEY });
   }, [query.data, client]);
   return query;
@@ -52,29 +117,60 @@ export function useGitLabWorkHosts(enabled: boolean) {
   });
 }
 
+export function gitlabWorkItemsOptions(
+  section: GitLabWorkSection,
+  labels: readonly string[],
+  status: MrListStatus = "open",
+  watchedUrls: readonly string[] = [],
+) {
+  const teamLabels = section === "team" ? [...labels].sort() : [];
+  const state = section === "issues" ? "open" : status;
+  const watches = section === "mine" ? [...new Set(watchedUrls)].sort() : [];
+  return queryOptions({
+    queryKey: [...GITLAB_WORK_KEY, section, teamLabels, state, watches],
+    queryFn: () => api.gitlabWorkItems(section, teamLabels, state, watches),
+    placeholderData: (previous, query) =>
+      section === "mine" &&
+      query?.queryKey[1] === "mine" &&
+      query.queryKey[3] === state
+        ? previous
+        : undefined,
+    staleTime: 60_000,
+    refetchInterval: section === "mine" && watches.length > 0 ? 60_000 : false,
+    retry: false,
+  });
+}
+
 export function useGitLabWorkItems(
   section: GitLabWorkSection,
   labels: string[],
   enabled: boolean,
+  status: MrListStatus = "open",
+  watchedUrls: readonly string[] = [],
 ) {
-  const teamLabels = section === "team" ? [...labels].sort() : [];
   return useQuery({
-    queryKey: [...GITLAB_WORK_KEY, section, teamLabels],
-    queryFn: () => api.gitlabWorkItems(section, teamLabels),
-    enabled: enabled && (section !== "team" || teamLabels.length > 0),
+    ...gitlabWorkItemsOptions(section, labels, status, watchedUrls),
+    enabled: enabled && (section !== "team" || labels.length > 0),
+  });
+}
+
+export function useWatchGitLabMergeRequest() {
+  return useMutation({
+    mutationFn: (url: string) => api.gitlabWatchMergeRequest(url),
+  });
+}
+
+export function gitlabWorkTodosOptions() {
+  return queryOptions({
+    queryKey: [...GITLAB_WORK_KEY, "todos"],
+    queryFn: api.gitlabWorkTodos,
     staleTime: 60_000,
     retry: false,
   });
 }
 
 export function useGitLabWorkTodos(enabled: boolean) {
-  return useQuery({
-    queryKey: [...GITLAB_WORK_KEY, "todos"],
-    queryFn: api.gitlabWorkTodos,
-    enabled,
-    staleTime: 60_000,
-    retry: false,
-  });
+  return useQuery({ ...gitlabWorkTodosOptions(), enabled });
 }
 
 export function useCompleteWorkTodo() {

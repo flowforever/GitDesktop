@@ -9,6 +9,7 @@ import type { WorkTodo } from "@/lib/git/types/gitlab-work";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { parseableDate } from "@/lib/time";
+import { WorkItemMetadata } from "./WorkItemMetadata";
 
 const keyOf = (todo: WorkTodo) => `${todo.host}:${todo.id}`;
 const rowId = (todo: WorkTodo) =>
@@ -122,6 +123,11 @@ export function WorkTodosList({
                 className="min-w-0 flex-1 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <span className="block truncate font-medium">{todo.title}</span>
+                {todo.item && (
+                  <span className="mt-1.5 block">
+                    <WorkItemMetadata item={todo.item} />
+                  </span>
+                )}
                 <span className="mt-1 flex gap-2 text-[11px] text-muted-foreground">
                   <span>{todo.action.replaceAll("_", " ")}</span>
                   <span className="truncate">

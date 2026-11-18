@@ -101,7 +101,7 @@ export function WorkDocumentBar() {
     <div
       role="tablist"
       aria-label="Work documents"
-      className="flex min-w-0 shrink-0 border-b bg-muted/20"
+      className="flex min-w-0 shrink-0 border-b bg-muted/40"
       onKeyDown={(event) => {
         if (hasChordModifier(event)) return;
         if (
@@ -142,8 +142,10 @@ export function WorkDocumentBar() {
           tabIndex={selected === id ? 0 : -1}
           onClick={() => activateWorkTab(id)}
           className={cn(
-            "shrink-0 border-r px-4 py-2 text-xs focus-visible:outline-2 focus-visible:outline-ring",
-            selected === id && "bg-background font-medium",
+            "shrink-0 border-r border-b-2 border-b-transparent px-4 py-2 text-xs focus-visible:outline-2 focus-visible:outline-ring",
+            selected === id
+              ? "border-b-primary bg-accent font-semibold text-foreground"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
           )}
         >
           {label}
@@ -168,8 +170,10 @@ export function WorkDocumentBar() {
             <div
               key={id}
               className={cn(
-                "flex max-w-64 shrink-0 items-center border-r",
-                selected === id && "bg-background",
+                "flex max-w-64 shrink-0 items-center border-r border-b-2 border-b-transparent",
+                selected === id
+                  ? "border-b-primary bg-accent"
+                  : "hover:bg-muted/60",
               )}
             >
               <button
@@ -188,7 +192,12 @@ export function WorkDocumentBar() {
                 tabIndex={selected === id ? 0 : -1}
                 onClick={() => activateWorkTab(id)}
                 title={tooltip}
-                className="min-w-0 truncate px-3 py-2 text-xs focus-visible:outline-2 focus-visible:outline-ring"
+                className={cn(
+                  "min-w-0 truncate px-3 py-2 text-xs focus-visible:outline-2 focus-visible:outline-ring",
+                  selected === id
+                    ? "font-semibold text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
               >
                 <span className="mr-2 font-mono text-muted-foreground">
                   {tab.kind === "repository" ? (

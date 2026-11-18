@@ -36,6 +36,7 @@ const { openMock } = vi.hoisted(() => ({
 vi.mock("@/lib/last-checkout/hint", () => ({ useReopenHint: vi.fn() }));
 vi.mock("@/features/repository/useOpenRepoByPath", () => ({
   useOpenRepoByPath: () => openMock,
+  useOpenWorktree: () => async () => false,
 }));
 vi.mock("@/lib/settings/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/settings/api")>()),

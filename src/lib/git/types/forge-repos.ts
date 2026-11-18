@@ -113,6 +113,8 @@ export interface MyWorkItem {
   url: string;
   updatedAt: string;
   authorLogin?: string | null;
+  labels?: string[];
+  labelColors?: Record<string, string>;
   /** Which forge the row came from. The rows of several providers merge into one
    *  list, so the item carries its own provider rather than inheriting the
    *  screen's — it drives the row glyph and the per-row open/link copy. */

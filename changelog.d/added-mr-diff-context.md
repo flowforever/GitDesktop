@@ -1,0 +1,1 @@
+- Expand nearby code above, between and below MR change blocks with the same context controls as Local Changes, using the selected file's pinned before-and-after versions.

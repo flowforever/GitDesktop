@@ -10,7 +10,6 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useUpdateCheck } from "@/features/updates/useUpdateCheck";
 import { formatBinding } from "@/lib/hotkeys/binding";
 import { dispatchAction, useEffectiveBindings } from "@/lib/hotkeys/hotkeys";
 import type { ActionId } from "@/lib/hotkeys/registry";
@@ -18,6 +17,7 @@ import { useSaveSettings, useSettings } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { cn } from "@/lib/utils";
 import { RecentRepoList } from "./RecentRepoList";
+import { RecentWorktreesPanel } from "./RecentWorktreesPanel";
 
 export function WelcomeScreen() {
   const openSettings = useUiStore((s) => s.openSettings);
@@ -27,7 +27,6 @@ export function WelcomeScreen() {
   const settings = useSettings();
   const saveSettings = useSaveSettings();
   const bindings = useEffectiveBindings();
-  const updateAvailable = Boolean(useUpdateCheck().data);
 
   function dismissNudge() {
     if (settings.data) {
@@ -132,9 +131,9 @@ export function WelcomeScreen() {
 
                   <aside
                     aria-label="Repository actions"
-                    className="min-w-0 space-y-2"
+                    className="flex min-w-0 flex-col gap-2 md:min-h-0 md:self-stretch"
                   >
-                    <div className="flex min-h-6 items-center justify-between gap-2 px-1">
+                    <div className="flex min-h-6 shrink-0 items-center justify-between gap-2 px-1">
                       <h2 className="font-heading text-sm font-medium">
                         Repository actions
                       </h2>
@@ -151,31 +150,16 @@ export function WelcomeScreen() {
                         <Button
                           variant="ghost"
                           size="icon-xs"
-                          className="relative"
-                          aria-label={
-                            updateAvailable
-                              ? "Settings — update available"
-                              : "Settings"
-                          }
-                          title={
-                            updateAvailable
-                              ? "Settings — update available"
-                              : "Settings"
-                          }
+                          aria-label="Settings"
+                          title="Settings"
                           onClick={() => openSettings()}
                         >
                           <GearIcon />
-                          {updateAvailable && (
-                            <span
-                              aria-hidden
-                              className="absolute top-1 right-1 size-1.5 rounded-full bg-primary ring-2 ring-background animate-in fade-in motion-reduce:animate-none"
-                            />
-                          )}
                         </Button>
                       </div>
                     </div>
 
-                    <div className="border bg-muted/20 p-3">
+                    <div className="shrink-0 border bg-muted/20 p-3">
                       {(["repository", "navigation"] as const).map((group) => (
                         <div
                           key={group}
@@ -229,6 +213,7 @@ export function WelcomeScreen() {
                         Drop a repository folder anywhere to open it.
                       </p>
                     </div>
+                    <RecentWorktreesPanel />
                   </aside>
                 </div>
               </>

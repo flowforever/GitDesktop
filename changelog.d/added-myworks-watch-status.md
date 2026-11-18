@@ -1,0 +1,1 @@
+- Combine authored, assigned and reviewed MRs in My Merge Requests. Watch additional GitLab MRs by link, retain merged watches, hide closed requests, and filter every MR category by Open or Merged before the search field.

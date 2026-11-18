@@ -563,6 +563,10 @@ and table row are the reference).
   list's last item for the MR head. Complete MR comparisons read both snapshots
   from the forge's pinned base/head metadata; a forge patch's line counts alone
   cannot prove its before side complete.
+- MR Diff supplies the shared renderer's `fileContent` only after
+  `buildPrSnapshotContext` proves the displayed patch against the pinned pair.
+  Keep its partial patch for collapsed native gaps; hold late content while a
+  line composer is open, including queued deferred models.
 - MR import links use `PrCodeImportLinks`, `usePrImportNavigation`, and
   the language-specific scanner/resolver dispatch in `code-import-languages`
   and `code-import-resolution`: decorate only code HTML islands or native
@@ -751,6 +755,12 @@ dedupe the animate group, so `animate-none` vs an existing `animate-in` is a
 build-order lottery (tailwind-merge 3.6.0; in-repo: `data-open:animate-none!`).
 
 **State & rendering gotchas.**
+- My works lists preload through `useGitLabWorkBackground` at the app root,
+  outside Activity panels. The visible list and loader share query options;
+  author/labels come from list responses, never per-row requests. Preserve the
+  shared account baseline so the loader and visible view cannot reset each other.
+  MR cache keys include status and saved watch URLs; a watch-list change may
+  retain rows within one status, never carry Open rows into Merged.
 - `<Activity>`-hidden subtrees still render but hold no query observers, so
   they fetch nothing while hidden; the re-show refetches anything past its
   staleTime. Keep a heavy query's `enabled` gated on the active tab as a

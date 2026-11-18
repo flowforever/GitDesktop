@@ -1,0 +1,1 @@
+- Keep nearby-code expansion available when GitLab omits the prefix on empty context lines, including files with CRLF line endings.

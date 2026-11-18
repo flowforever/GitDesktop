@@ -16,6 +16,10 @@ vi.mock("@/lib/last-checkout/store", async (original) => ({
   ...(await original<typeof import("@/lib/last-checkout/store")>()),
   lastCheckoutReady: vi.fn(async () => undefined),
 }));
+vi.mock("@/lib/git/worktree", async (original) => ({
+  ...(await original<typeof import("@/lib/git/worktree")>()),
+  listUserWorktrees: vi.fn(async () => []),
+}));
 
 // jsdom has no scrolling implementation; the real repository filter scrolls rows.
 Element.prototype.scrollIntoView ??= () => undefined;
@@ -96,6 +100,13 @@ describe("Repositories chooser layout", () => {
     for (const name of ACTION_NAMES) {
       expect(within(actions).getByRole("button", { name })).toBeVisible();
     }
+    const recentWorktrees = within(actions).getByRole("region", {
+      name: "Recent worktrees",
+    });
+    expect(
+      open.compareDocumentPosition(recentWorktrees) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("keeps the empty repository state first and every launcher reachable", async () => {
