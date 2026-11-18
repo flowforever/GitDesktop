@@ -1,0 +1,32 @@
+.gd-diff-columns {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Fixed-table columns ignore mixed percentage/length calcs; use measured lengths
+   while leaving each number gutter intact. */
+.gd-diff-columns .split-diff-view-wrap .diff-table-old-content-col {
+  width: calc(var(--gd-diff-old-width-px, 50%) - var(--diff-aside-width--));
+}
+
+.gd-diff-columns .split-diff-view-wrap .diff-table-new-content-col {
+  width: calc(var(--gd-diff-new-width-px, 50%) - var(--diff-aside-width--));
+}
+
+/* Unwrapped splits retain the library's independent, synchronized scrollers. */
+.gd-diff-columns .split-diff-view-normal > .old-diff-table-wrapper {
+  flex: 0 0 calc(var(--gd-diff-old-width) - 0.5px);
+  width: calc(var(--gd-diff-old-width) - 0.5px);
+  min-width: 0;
+}
+
+.gd-diff-columns .split-diff-view-normal > .diff-split-line {
+  flex: 0 0 1px;
+}
+
+.gd-diff-columns .split-diff-view-normal > .new-diff-table-wrapper {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}

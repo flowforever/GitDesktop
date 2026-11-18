@@ -123,6 +123,7 @@ const IDENTITY_STORES: IdentityStore[] = [
 const RAW_PATH_STORES: { file: string; key: string }[] = [
   { file: "plans.json", key: "plans" },
   { file: "research.json", key: "research" },
+  { file: "mr-chats.json", key: "chats" },
 ];
 
 function isRecord(v: unknown): v is Record<string, unknown> {

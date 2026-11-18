@@ -456,6 +456,8 @@ in one click.
   reveal changed files in the tree and navigate individual change blocks.
   Left/right arrows beside the file arrows move through visited files, restoring
   their file-list scope and tree selection. Each MR tab keeps its own history.
+  Drag the file-list boundary or the divider between the old and new code panes
+  to change their widths; the chosen sizes survive file switches.
 - **File context while reviewing**: toggle **All files** in the Files sidebar
   to browse the complete tree at the request's head commit. Unchanged files have
   a separate marker and open as read-only source; changed files keep their diff.
@@ -465,6 +467,16 @@ in one click.
   missing commit objects without switching your branch. In Diff view, the shared
   context arrows reveal code above, between and below change blocks, using that
   MR's before-and-after versions. Other files stay unloaded.
+  The active request prepares its selected file in the background; a loading
+  notice keeps preparation visible while the partial diff remains available.
+- **Chat while reviewing**: the right sidebar offers CLI and model selection,
+  includes the current request's context, and can attach the viewed file or
+  selected diff/source code. Its session picker lists only ongoing chats for
+  this request and checkout, including chats awaiting your next message.
+  **End chat** removes a conversation from that picker. The read-only chat stays
+  with the request as you switch sections. Collapse it to a narrow strip or drag
+  its left boundary to adjust its width; drafts, attachments and running chats
+  are retained. AI-excluded files stay out of context.
 - **Follow imports while reviewing**: click an import, module or include path
   in a diff or source preview to open its file at the request's head and reveal
   it in the tree. Supports JavaScript/TypeScript, Python, Go, Rust, Java/Kotlin,

@@ -29,6 +29,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { DiffColumns } from "@/components/diff-columns";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { LabeledGroup } from "@/components/form/labeled-group";
 import { InfoNote } from "@/components/info-note";
@@ -57,6 +58,7 @@ import {
   type HeaderOnlyDiff,
   headerOnlyMessage,
   modeChangeMessage,
+  sectionOldFilePath,
   type TypechangeHalves,
   typechangeHalves,
 } from "@/lib/git/diff-split";
@@ -339,6 +341,7 @@ export function GitDiffView({
   filePath,
   oldPath,
   text,
+  anchorCommit,
   fullContext = false,
   fileContent,
   repoPath,
@@ -355,6 +358,8 @@ export function GitDiffView({
    *  Omitted = `filePath`, for hosts with no old side to read. */
   oldPath?: string;
   text: string;
+  /** Commit owning the caller-verified file model, when supplied. */
+  anchorCommit?: string | null;
   /** Caller-verified, bounded complete context: skip only the row preview cap.
    *  Generated-line and shortening guards remain active. */
   fullContext?: boolean;
@@ -393,6 +398,7 @@ export function GitDiffView({
           filePath={filePath}
           oldPath={oldPath}
           text={text}
+          anchorCommit={anchorCommit}
           fullContext={fullContext}
           fileContent={fileContent}
           repoPath={repoPath}
@@ -1141,6 +1147,7 @@ function RenderedDiff({
   filePath,
   oldPath,
   text,
+  anchorCommit,
   fullContext = false,
   fileContent,
   repoPath,
@@ -1155,6 +1162,7 @@ function RenderedDiff({
   filePath: string;
   oldPath?: string;
   text: string;
+  anchorCommit?: string | null;
   fullContext?: boolean;
   fileContent?: DiffFileContent;
   repoPath?: string;
@@ -1191,17 +1199,34 @@ function RenderedDiff({
   // Build the diff off deferred values so rapid arrow-key navigation isn't
   // forced to rebuild on every keystroke: React keeps the previous diff on
   // screen and builds the new one at low priority, coalescing fast steps.
-  const deferredText = useDeferredValue(text);
-  const deferredPath = useDeferredValue(filePath);
-  const deferredOldPath = useDeferredValue(oldPath ?? filePath);
-  const incomingFileContent = useDeferredValue(fileContent);
+  const source = useMemo(
+    () => ({
+      text,
+      path: filePath,
+      oldPath: oldPath ?? filePath,
+      oldFilePath: sectionOldFilePath(text) ?? oldPath ?? filePath,
+      content: fileContent,
+      headSha: anchorCommit ?? undefined,
+    }),
+    [text, filePath, oldPath, fileContent, anchorCommit],
+  );
+  const deferredSource = useDeferredValue(source);
+  const deferredText = deferredSource.text;
+  const deferredPath = deferredSource.path;
+  const deferredOldPath = deferredSource.oldPath;
   const providedContext = useMemo(
     () => ({
       path: deferredPath,
       text: deferredText,
-      content: incomingFileContent,
+      content: deferredSource.content,
+      headSha: deferredSource.headSha,
     }),
-    [deferredPath, deferredText, incomingFileContent],
+    [
+      deferredPath,
+      deferredText,
+      deferredSource.content,
+      deferredSource.headSha,
+    ],
   );
   // A queued deferred read can reach this renderer after the caller has already
   // retained its new prop. Hold it here too before it can replace a live editor.
@@ -1342,9 +1367,26 @@ function RenderedDiff({
     contentHold,
     grammarState,
   ]);
-  // Through a refresh's hold, the build already on screen, with the worker
-  // highlighting painted on it (the worker answers nothing while held).
-  const diffFile = useRetained(builtDiffFile, !contentHold);
+  // Retain the model and provenance through content refreshes. Only verified
+  // caller content can name its head; a raw forge patch may outlive that head.
+  const builtModel = useMemo(
+    () => ({
+      file: builtDiffFile,
+      path: deferredPath,
+      oldPath: deferredSource.oldFilePath,
+      headSha:
+        deferredFileContent === undefined ? undefined : paintedContext.headSha,
+    }),
+    [
+      builtDiffFile,
+      deferredPath,
+      deferredSource.oldFilePath,
+      deferredFileContent,
+      paintedContext.headSha,
+    ],
+  );
+  const paintedModel = useRetained(builtModel, !contentHold);
+  const diffFile = paintedModel.file;
   const shownHighlighter = useRetained(workerHighlighter, !contentHold);
 
   // Per-side extendData maps, keyed by String(line). Memoized for referential
@@ -1735,56 +1777,61 @@ function RenderedDiff({
     <div
       ref={diffLandingRef}
       role="group"
-      aria-label={`Diff of ${deferredPath}`}
+      aria-label={`Diff of ${paintedModel.path}`}
+      data-diff-file-path={paintedModel.path}
+      data-diff-old-file-path={paintedModel.oldPath}
+      data-diff-head-sha={paintedModel.headSha}
       tabIndex={-1}
       className="outline-none"
     >
       {inSlot && <span ref={rowsProbeRef} hidden />}
-      {lineWidget?.enabled ? (
-        // Line-comment mode: the multi-select variant adds clickable line numbers
-        // and drag-to-select, opening the composer below the line. Opt-in only.
-        <DiffViewWithMultiSelect<{ render: () => ReactNode }>
-          ref={multiSelectRef}
-          diffFile={diffFile}
-          // Worker ASTs land as a highlighter PROP, not a rebuild: the view's
-          // effect applies them to its own clone, so expansion state survives.
-          registerHighlighter={shownHighlighter}
-          diffViewMode={diffViewMode}
-          diffViewTheme={isDark ? "dark" : "light"}
-          diffViewHighlight
-          diffViewWrap
-          diffViewFontSize={12}
-          extendData={extendData}
-          renderExtendLine={renderExtendLine}
-          // Makes line-number cells clickable (flows through to the inner
-          // DiffView), which is what opens the widget slot.
-          diffViewAddWidget
-          enableMultiSelect
-          // Track the drag range ourselves so a "+" press on ANY line of it opens
-          // a range composer. The library's own max-line fast path never fires:
-          // "+" mousedown starts a native single-line selection in an ANCESTOR
-          // listener (before React's synthetic handlers), wiping the stored
-          // multiResult; the React onMouseDown then opens the widget and calls
-          // clearSelection, so mouseup fires no onSelectionComplete. The widget
-          // renders during the mousedown flush, BEFORE mouseup — so our captured
-          // range still holds at render time and overrides the single-line report.
-          onMultiSelectComplete={onMultiSelectComplete}
-          onMultiSelectChange={onMultiSelectChange}
-          renderWidgetLine={renderWidgetLine}
-        />
-      ) : (
-        <DiffView<{ render: () => ReactNode }>
-          diffFile={diffFile}
-          registerHighlighter={shownHighlighter}
-          diffViewMode={diffViewMode}
-          diffViewTheme={isDark ? "dark" : "light"}
-          diffViewHighlight
-          diffViewWrap
-          diffViewFontSize={12}
-          extendData={extendData}
-          renderExtendLine={renderExtendLine}
-        />
-      )}
+      <DiffColumns mode={viewMode}>
+        {lineWidget?.enabled ? (
+          // Line-comment mode: the multi-select variant adds clickable line numbers
+          // and drag-to-select, opening the composer below the line. Opt-in only.
+          <DiffViewWithMultiSelect<{ render: () => ReactNode }>
+            ref={multiSelectRef}
+            diffFile={diffFile}
+            // Worker ASTs land as a highlighter PROP, not a rebuild: the view's
+            // effect applies them to its own clone, so expansion state survives.
+            registerHighlighter={shownHighlighter}
+            diffViewMode={diffViewMode}
+            diffViewTheme={isDark ? "dark" : "light"}
+            diffViewHighlight
+            diffViewWrap
+            diffViewFontSize={12}
+            extendData={extendData}
+            renderExtendLine={renderExtendLine}
+            // Makes line-number cells clickable (flows through to the inner
+            // DiffView), which is what opens the widget slot.
+            diffViewAddWidget
+            enableMultiSelect
+            // Track the drag range ourselves so a "+" press on ANY line of it opens
+            // a range composer. The library's own max-line fast path never fires:
+            // "+" mousedown starts a native single-line selection in an ANCESTOR
+            // listener (before React's synthetic handlers), wiping the stored
+            // multiResult; the React onMouseDown then opens the widget and calls
+            // clearSelection, so mouseup fires no onSelectionComplete. The widget
+            // renders during the mousedown flush, BEFORE mouseup — so our captured
+            // range still holds at render time and overrides the single-line report.
+            onMultiSelectComplete={onMultiSelectComplete}
+            onMultiSelectChange={onMultiSelectChange}
+            renderWidgetLine={renderWidgetLine}
+          />
+        ) : (
+          <DiffView<{ render: () => ReactNode }>
+            diffFile={diffFile}
+            registerHighlighter={shownHighlighter}
+            diffViewMode={diffViewMode}
+            diffViewTheme={isDark ? "dark" : "light"}
+            diffViewHighlight
+            diffViewWrap
+            diffViewFontSize={12}
+            extendData={extendData}
+            renderExtendLine={renderExtendLine}
+          />
+        )}
+      </DiffColumns>
       <DiffCapFooter
         hidden={hidden}
         shortened={shortened}
@@ -2214,8 +2261,8 @@ export function DiffContent({
   /** Set only by the working-tree staging host; enables the non-UTF-8 note.
    *  Absent = read-only host, no note. */
   stagingSide?: StagingSide;
-  /** PR surfaces only: the commit oid gating the binary-size lookups (PR head on Files,
-   *  the commit on Commits). undefined = local surface. See BinaryFileSummary. */
+  /** PR surfaces only: the commit owning the verified file model and gating
+   *  binary-size lookups (PR head on Files, commit on Commits). */
   anchorCommit?: string | null;
   /** Adds the whitespace section to the Diff options sheet and answers the
    *  whitespace palette action. Only {@link DiffSurface} sets it, so the
@@ -2641,6 +2688,7 @@ export function DiffContent({
           filePath={filePath}
           oldPath={filePath}
           text={halves.text}
+          anchorCommit={anchorCommit}
           repoPath={repoPath}
           forceUnified={narrowPane}
           revealLanding={controlsRef}
@@ -2784,6 +2832,7 @@ export function DiffContent({
               filePath={filePath}
               oldPath={oldSidePath}
               text={data.text}
+              anchorCommit={anchorCommit}
               fullContext={
                 fullContext && !data.isTruncated && !dataIsPlaceholder
               }

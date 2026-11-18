@@ -1340,21 +1340,36 @@ function binaryArmViolations(surfaceRaw) {
 test("diff shell: the binary arm wires BinaryFileSummary's gates", () => {
   const surface = read(SURFACE);
   assert.deepEqual(binaryArmViolations(surface), []);
-  const swap = (from, to) => {
+  const swap = (from, to, withinBinarySummary = false) => {
+    const start = withinBinarySummary
+      ? surface.indexOf("<BinaryFileSummary")
+      : 0;
+    const end = withinBinarySummary
+      ? tagEnd(maskNonCode(surface, true), start)
+      : surface.length;
     assert.ok(
-      surface.includes(from),
+      start >= 0 && end > start,
+      "binary summary mutation scope missing",
+    );
+    const target = surface.slice(start, end);
+    assert.ok(
+      target.includes(from),
       `negative-control anchor missing: ${from}`,
     );
-    return surface.replace(from, () => to);
+    return (
+      surface.slice(0, start) +
+      target.replace(from, () => to) +
+      surface.slice(end)
+    );
   };
-  for (const [what, from, to] of [
+  for (const [what, from, to, withinBinarySummary] of [
     ["held is the placeholder flag", "held={dataIsPlaceholder === true}", ""],
     [
       "worktreeNewSide reads the image revs' new side",
       "worktreeNewSide={imageRevs?.new === null}",
       "worktreeNewSide={imageRevs?.new !== null}",
     ],
-    ["anchorCommit passes through", "anchorCommit={anchorCommit}", ""],
+    ["anchorCommit passes through", "anchorCommit={anchorCommit}", "", true],
     [
       "the summary mounts only with a repo path",
       "repoPath !== undefined ? (\n              <BinaryFileSummary",
@@ -1388,7 +1403,7 @@ test("diff shell: the binary arm wires BinaryFileSummary's gates", () => {
       "const extra = <BinaryFileSummary />;\nfunction HeaderOnlyDetail(",
     ],
   ]) {
-    const got = binaryArmViolations(swap(from, to));
+    const got = binaryArmViolations(swap(from, to, withinBinarySummary));
     assert.ok(
       got.includes(what),
       `expected "${what}", got ${JSON.stringify(got)}`,

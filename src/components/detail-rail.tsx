@@ -6,11 +6,13 @@ import {
   type ReactNode,
   useContext,
   useEffectEvent,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { usePanelActive } from "@/components/panel-portal";
+import { ResizeSeparator } from "@/components/resize-separator";
 import { Button } from "@/components/ui/button";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import type { AppSettings } from "@/lib/settings/api";
@@ -19,6 +21,7 @@ import {
   useSaveSettings,
   useSettings,
 } from "@/lib/settings/queries";
+import { useDiffLayoutStore } from "@/lib/stores/diff-layout";
 import { useContainerWidth } from "@/lib/use-container-width";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +45,7 @@ const RailWidthContext = createContext<number | null>(null);
 export function DetailRailRow({ children }: { children: ReactNode }) {
   const [measureRef, width] = useContainerWidth<HTMLDivElement>();
   return (
-    <div ref={measureRef} className="flex min-h-0 flex-1">
+    <div ref={measureRef} className="flex min-h-0 min-w-0 flex-1">
       <RailWidthContext value={width}>{children}</RailWidthContext>
     </div>
   );
@@ -72,6 +75,17 @@ export function DetailRail({
   children: ReactNode;
 }) {
   const rowWidth = useContext(RailWidthContext);
+  const railId = useId();
+  const preferredWidth = useDiffLayoutStore((s) => s.fileRailWidth);
+  const setWidth = useDiffLayoutStore((s) => s.setFileRailWidth);
+  const maxWidth =
+    rowWidth !== null && rowWidth > 0
+      ? Math.min(560, Math.max(0, rowWidth - 224))
+      : 560;
+  const minWidth = Math.min(160, maxWidth);
+  const width = Math.round(
+    Math.min(maxWidth, Math.max(minWidth, preferredWidth)),
+  );
   const settings = useSettings();
   const saveSettings = useSaveSettings();
   const queryClient = useQueryClient();
@@ -193,8 +207,13 @@ export function DetailRail({
   return (
     <aside
       ref={railRef}
+      id={railId}
       aria-label={role ? LANDMARK_LABEL : ariaLabel}
-      className={cn("flex w-72 shrink-0 flex-col border-r", className)}
+      className={cn(
+        "relative flex min-w-0 shrink-0 flex-col border-r",
+        className,
+      )}
+      style={{ width }}
     >
       <div className="flex h-7 shrink-0 items-center justify-end gap-2 border-b px-0.5">
         {/* `pl-2.5` on top of the row's `px-0.5` puts the header's text column on
@@ -226,6 +245,20 @@ export function DetailRail({
       >
         {children}
       </div>
+      {maxWidth > minWidth && (
+        <ResizeSeparator
+          label="Resize file list"
+          controls={railId}
+          value={width}
+          min={minWidth}
+          max={maxWidth}
+          onValueChange={setWidth}
+          step={16}
+          largeStep={48}
+          valueText={`${width} pixels`}
+          style={{ right: -4 }}
+        />
+      )}
     </aside>
   );
 }

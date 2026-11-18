@@ -15,6 +15,7 @@ import {
 } from "react";
 import { DetailRailRow } from "@/components/detail-rail";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
+import { InfoNote } from "@/components/info-note";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -94,7 +95,10 @@ import { PrFilesTree, type PrTreeFile } from "./PrFilesTree";
 import { PrFullFileLoading } from "./PrFullFileLoading";
 import { PrImportTargetPicker } from "./PrImportTargetPicker";
 import { ReviewThreadCard, type SuggestionApply } from "./ReviewThreads";
-import { usePrDiffContext } from "./usePrDiffContext";
+import {
+  type PrDiffContextResource,
+  usePrDiffContext,
+} from "./usePrDiffContext";
 import {
   type PrFileHistory,
   type PrFileVisit,
@@ -1036,6 +1040,50 @@ function PrFullFileSlot({
   );
 }
 
+const NEARBY_CODE_PREPARATION: Partial<
+  Record<PrDiffContextResource["state"], string>
+> = {
+  loading: "Loading nearby code…",
+  paused: offlinePendingMessage("nearby code"),
+};
+
+const NEARBY_CODE_REFUSAL: Record<
+  NonNullable<PrDiffContextResource["reason"]>,
+  string
+> = {
+  "too-large": "Nearby code is too large to display safely.",
+  binary: "Nearby code is unavailable for binary or non-UTF-8 files.",
+  invalid: "Couldn't verify nearby code against these changes.",
+  mismatch: "Couldn't verify nearby code against these changes.",
+};
+
+function NearbyCodeNotice({ resource }: { resource: PrDiffContextResource }) {
+  const preparation = NEARBY_CODE_PREPARATION[resource.state];
+  let failure: string | undefined;
+  if (resource.state === "error")
+    failure = `Couldn't load nearby code. ${presentError(resource.error).summary}`;
+  else if (resource.state === "unavailable")
+    failure = NEARBY_CODE_REFUSAL[resource.reason ?? "invalid"];
+  return (
+    <>
+      <DegradedListNotice
+        noun="nearby code"
+        degraded={failure !== undefined}
+        message={failure}
+        onRetry={resource.retry}
+        className="shrink-0 border-b px-3 py-1.5"
+      />
+      {preparation !== undefined && (
+        <InfoNote className="shrink-0">
+          <span role="status" aria-label="Nearby code">
+            {preparation}
+          </span>
+        </InfoNote>
+      )}
+    </>
+  );
+}
+
 /** One file's diff in the Files pane's slot: its section of the pull request's
  *  patch, and the threads and drafts anchored to it, so a held file never shows
  *  the next one's. */
@@ -1214,7 +1262,7 @@ function PrFileDiffSlot({
   ]);
 
   const widget = useSlotWidget(lineWidget);
-  const diffContext = usePrDiffContext({
+  const nearbyCode = usePrDiffContext({
     repoPath,
     number,
     headSha: anchorCommit,
@@ -1224,27 +1272,33 @@ function PrFileDiffSlot({
     enabled: contextEnabled && !dataIsPlaceholder && !isPending,
     composerOpen,
   });
+  const diffContext = nearbyCode.context;
   const renderData = useMemo(
     () => (data && diffContext ? { ...data, text: diffContext.patch } : data),
     [data, diffContext],
   );
   const content = (
-    <DiffContent
-      filePath={path}
-      data={renderData}
-      isPending={isPending}
-      isError={isError}
-      isPaused={isPaused}
-      isFetching={isFetching}
-      onRetry={onRetry}
-      dataIsPlaceholder={dataIsPlaceholder}
-      repoPath={repoPath}
-      previewRev={previewRev}
-      anchorCommit={anchorCommit}
-      fileContent={diffContext?.content}
-      lineAnchors={lineAnchors}
-      lineWidget={widget}
-    />
+    <div className="flex h-full min-h-0 flex-col">
+      <NearbyCodeNotice resource={nearbyCode} />
+      <div className="min-h-0 flex-1">
+        <DiffContent
+          filePath={path}
+          data={renderData}
+          isPending={isPending}
+          isError={isError}
+          isPaused={isPaused}
+          isFetching={isFetching}
+          onRetry={onRetry}
+          dataIsPlaceholder={dataIsPlaceholder}
+          repoPath={repoPath}
+          previewRev={previewRev}
+          anchorCommit={anchorCommit}
+          fileContent={diffContext?.content}
+          lineAnchors={lineAnchors}
+          lineWidget={widget}
+        />
+      </div>
+    </div>
   );
   return onOpenImport ? (
     <PrCodeImportLinks

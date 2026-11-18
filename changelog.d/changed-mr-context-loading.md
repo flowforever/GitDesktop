@@ -1,0 +1,1 @@
+- Prepare the active MR's selected-file context earlier and show loading, offline and retry feedback while the partial diff stays visible.

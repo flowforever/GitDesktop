@@ -21,6 +21,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
+import { DiffColumns } from "@/components/diff-columns";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { InfoNote } from "@/components/info-note";
 import { PathText } from "@/components/path-text";
@@ -3110,21 +3111,23 @@ function StagingDiffView({
           )}
         </HunkHeaderBar>
       )}
-      <DiffView<HunkHeaderData>
-        diffFile={diffFile}
-        // Worker ASTs land as a highlighter PROP, not a rebuild: the view's
-        // effect applies them to its own clone, so expansion state survives.
-        registerHighlighter={shownHighlighter}
-        diffViewMode={
-          viewMode === "split" ? DiffModeEnum.Split : DiffModeEnum.Unified
-        }
-        diffViewTheme={isDark ? "dark" : "light"}
-        diffViewHighlight
-        diffViewWrap
-        diffViewFontSize={12}
-        extendData={extendData}
-        renderExtendLine={renderExtendLine}
-      />
+      <DiffColumns mode={viewMode === "split" ? "split" : "unified"}>
+        <DiffView<HunkHeaderData>
+          diffFile={diffFile}
+          // Worker ASTs land as a highlighter PROP, not a rebuild: the view's
+          // effect applies them to its own clone, so expansion state survives.
+          registerHighlighter={shownHighlighter}
+          diffViewMode={
+            viewMode === "split" ? DiffModeEnum.Split : DiffModeEnum.Unified
+          }
+          diffViewTheme={isDark ? "dark" : "light"}
+          diffViewHighlight
+          diffViewWrap
+          diffViewFontSize={12}
+          extendData={extendData}
+          renderExtendLine={renderExtendLine}
+        />
+      </DiffColumns>
       {anchors.map((a, i) =>
         displayHunks[i] && i < wholeHunks && a.host === "row" && a.top >= 0 ? (
           // Buttons sit ON the `@@` separator row (never on code), right-aligned

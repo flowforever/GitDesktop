@@ -567,6 +567,13 @@ and table row are the reference).
   `buildPrSnapshotContext` proves the displayed patch against the pinned pair.
   Keep its partial patch for collapsed native gaps; hold late content while a
   line composer is open, including queued deferred models.
+- Prepare only the active MR's selected file with `usePrDiffContextWarmup`;
+  share `prSnapshotComparisonOptions` with its consumer and keep loading/error
+  notices retained with the patch. Never prefetch every MR's file contents.
+- MR chat reuses read-only `runAgentSession`, the `SessionConversationView`
+  transcript, and existing CLI pickers. Persist explicit host/project/IID and
+  repository scope; list only active sessions, never infer scope from prompts.
+  Attachments use painted file identities and pinned snapshot verification.
 - MR import links use `PrCodeImportLinks`, `usePrImportNavigation`, and
   the language-specific scanner/resolver dispatch in `code-import-languages`
   and `code-import-resolution`: decorate only code HTML islands or native
@@ -708,6 +715,12 @@ and table row are the reference).
   a bordered row, so a band under it stacks a second border and spends vertical
   space the list wants. Keep that content to one short line; the strip's h-7 is
   what pins the caret at the same height in both branches, so it must not grow.
+- Horizontal resizing uses `ResizeSeparator` and the session-only `diff-layout`
+  store. `DetailRail` owns the file-list handle; `DiffColumns` wraps both MR and
+  Local Changes split renderers. Clamp displayed sizes to the current container
+  without overwriting the preferred size, and preserve the built diff/editor.
+  `MrChatPane` uses the same separator at its left edge and retains collapsed
+  content through `TabPanel`; reconnected effects must preserve chat attachments.
 - Avatars: vendored `Avatar`/`AvatarImage`/`AvatarFallback` (canonical:
   `AuthorAvatar` in `src/features/conversations/Thread.tsx`) — never
   hand-rolled `<img>`/background divs. Biome-ignore comments use `/*`, not `/**`.

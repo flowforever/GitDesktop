@@ -1,0 +1,1 @@
+- Drag the file-list boundary and old/new diff divider to resize review panes; keyboard resizing and chosen widths work across file switches.

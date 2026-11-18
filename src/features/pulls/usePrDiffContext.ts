@@ -1,12 +1,75 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { usePanelActive } from "@/components/panel-portal";
 import { useDiffPaneHold } from "@/features/diff/diff-pane-hold";
 import { lineComposerOpen } from "@/features/diff/whitespace-mode";
 import { FULL_OID_RE } from "@/lib/git/oid";
 import { prSnapshotComparisonOptions } from "@/lib/git/queries/pr-snapshot";
 import type { FileDiff, RemoteLens } from "@/lib/git/types";
 import { useRetained } from "@/lib/use-retained";
-import { buildPrSnapshotContext } from "./pr-full-context";
+import {
+  buildPrSnapshotContext,
+  type FullContextRefusal,
+} from "./pr-full-context";
+
+type ContextTarget = {
+  repoPath?: string;
+  number?: number;
+  headSha?: string | null;
+  lens: RemoteLens;
+  path?: string | null;
+  enabled: boolean;
+};
+
+type PrDiffContext = {
+  content: { old: string | null; new: string | null };
+  patch: string;
+};
+
+export type PrDiffContextResource = {
+  context: PrDiffContext | undefined;
+  state: "idle" | "loading" | "paused" | "error" | "unavailable" | "ready";
+  reason?: FullContextRefusal;
+  error?: unknown;
+  retry?: () => void;
+};
+
+const IDLE: PrDiffContextResource = { context: undefined, state: "idle" };
+
+function eligibleTarget(target: ContextTarget): boolean {
+  return (
+    target.enabled &&
+    target.lens === "origin" &&
+    !!target.repoPath &&
+    target.number !== undefined &&
+    Number.isSafeInteger(target.number) &&
+    target.number > 0 &&
+    !!target.headSha &&
+    FULL_OID_RE.test(target.headSha) &&
+    !!target.path &&
+    !target.path.includes("\0") &&
+    !/^(?:[/\\]|[A-Za-z]:)/.test(target.path) &&
+    !target.path
+      .split("/")
+      .some((part) => !part || part === "." || part === "..")
+  );
+}
+
+/** Prepare only the active request's selected file; the Diff consumer shares
+ *  this query's pending read and still verifies its own displayed patch. */
+export function usePrDiffContextWarmup(target: ContextTarget): void {
+  const panelActive = usePanelActive();
+  useQuery({
+    ...prSnapshotComparisonOptions(
+      target.repoPath ?? "",
+      target.number ?? 0,
+      target.headSha ?? "",
+      target.path ?? "",
+      target.lens,
+    ),
+    enabled: panelActive && eligibleTarget(target),
+  });
+}
 
 /** Source-specific reads feed the same complete file models as Local Changes.
  *  The displayed patch remains partial; native renderer arrows reveal its gaps. */
@@ -28,23 +91,19 @@ export function usePrDiffContext({
   data?: FileDiff;
   enabled: boolean;
   composerOpen: boolean;
-}) {
+}): PrDiffContextResource {
   const { phase } = useDiffPaneHold();
+  const panelActive = usePanelActive();
   const composerHeld = composerOpen || lineComposerOpen();
   const eligible =
-    enabled &&
-    lens === "origin" &&
-    !!repoPath &&
-    number !== undefined &&
-    number > 0 &&
-    !!headSha &&
-    FULL_OID_RE.test(headSha) &&
+    eligibleTarget({ repoPath, number, headSha, lens, path, enabled }) &&
     data !== undefined &&
     data.filePath === path &&
     !data.isBinary &&
     !data.isTruncated &&
     /^@@ /m.test(data.text) &&
     !/^(?:---|\+\+\+) \/dev\/null(?:\r?$|\t)/m.test(data.text);
+  const canRead = eligible && panelActive && phase !== "held" && !composerHeld;
   const read = useQuery({
     ...prSnapshotComparisonOptions(
       repoPath ?? "",
@@ -53,38 +112,68 @@ export function usePrDiffContext({
       path,
       lens,
     ),
-    enabled: eligible && phase !== "held" && !composerHeld,
+    enabled: canRead,
   });
   const patch = data?.text;
-  const context = useMemo(() => {
+  const result = useMemo(() => {
     if (
       !eligible ||
       !read.data ||
       read.isPlaceholderData ||
-      read.data.oldPath === null ||
-      read.data.newPath === null ||
       patch === undefined
     )
       return undefined;
-    const result = buildPrSnapshotContext(
-      read.data,
-      path,
-      headSha ?? "",
-      patch,
-    );
-    return result.kind === "ready"
-      ? { content: result.content, patch: result.patch }
-      : undefined;
+    if (read.data.oldPath === null || read.data.newPath === null)
+      return { kind: "unavailable", reason: "invalid" } as const;
+    return buildPrSnapshotContext(read.data, path, headSha ?? "", patch);
   }, [eligible, read.data, read.isPlaceholderData, path, headSha, patch]);
+  const context = useMemo(
+    () =>
+      result?.kind === "ready"
+        ? { content: result.content, patch: result.patch }
+        : undefined,
+    [result],
+  );
+  let state: PrDiffContextResource["state"] = "idle";
+  if (eligible) {
+    if (context !== undefined) state = "ready";
+    else if (read.isPaused) state = "paused";
+    else if (read.isFetching) state = "loading";
+    else if (read.isError && !read.isFetching) state = "error";
+    else if (result !== undefined) state = "unavailable";
+    else if (canRead) state = "loading";
+  }
+  const reason = result?.kind === "unavailable" ? result.reason : undefined;
+  const retryable =
+    state === "error" ||
+    (state === "unavailable" &&
+      (reason === "invalid" || reason === "mismatch"));
+  const { refetch } = read;
+  const retry = useCallback(() => {
+    if (canRead && !lineComposerOpen()) void refetch();
+  }, [canRead, refetch]);
   const key = JSON.stringify([repoPath, lens, number, headSha, path]);
   const value = useMemo(
-    () => ({ key, patch: data?.text, context }),
-    [key, data?.text, context],
+    () => ({
+      key,
+      patch,
+      resource: {
+        context,
+        state,
+        reason,
+        error: read.error,
+        retry: retryable ? retry : undefined,
+      },
+    }),
+    [key, patch, context, state, reason, read.error, retryable, retry],
   );
-  // A late read must not rebuild a live comment editor, or a held slot. Never
-  // retain it across a different request/head/path or a changed partial patch.
-  const shown = useRetained(value, phase !== "held" && !composerHeld);
+  // Context and its notice land together, so late reads cannot rebuild a live
+  // editor or move its rows. A different identity or patch never inherits them.
+  const shown = useRetained(
+    value,
+    panelActive && phase !== "held" && !composerHeld,
+  );
   return shown.key === key && shown.patch === data?.text
-    ? shown.context
-    : undefined;
+    ? shown.resource
+    : IDLE;
 }

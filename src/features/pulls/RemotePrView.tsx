@@ -21,8 +21,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Fragment,
+  lazy,
   type ReactNode,
   type RefObject,
+  Suspense,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -40,6 +42,7 @@ import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { SelectControl } from "@/components/form/fields";
 import { HeldFrame, heldParentProps } from "@/components/held-frame";
+import { LazyPanelFallback } from "@/components/lazy-panel-fallback";
 import { ListRowSkeletons } from "@/components/list-row-skeleton";
 import { Markdown } from "@/components/markdown/markdown";
 import { hostedImagesFor } from "@/components/markdown/markdown-images";
@@ -291,6 +294,8 @@ import { cn } from "@/lib/utils";
 import { ChecksRollup } from "./ChecksRollup";
 import { LinkedIssuesField } from "./LinkedIssuesField";
 import { mergeStripArm } from "./merge-strip-arm";
+import { parseMrChatIdentity } from "./mr-chat/context";
+import { MrChatPane } from "./mr-chat/MrChatPane";
 import { PendingReviewBar } from "./PendingReviewBar";
 import { PendingReviewStrip } from "./PendingReviewStrip";
 import { PrActivityFeed, usePrThreadClaims } from "./PrActivityFeed";
@@ -347,7 +352,14 @@ import {
   useLinkedIssueChips,
 } from "./useLinkedIssueChips";
 import { usePrCapabilities } from "./usePrCapabilities";
+import { usePrDiffContextWarmup } from "./usePrDiffContext";
 import { usePrFileHistory } from "./usePrFileHistory";
+
+const MrChatSidebar = lazy(() =>
+  import("./mr-chat/MrChatSidebar").then((module) => ({
+    default: module.MrChatSidebar,
+  })),
+);
 
 /** The git remote a lens resolves to, mirroring the backend's own mapping
  *  (github/mod.rs:73 `lens_remote`). Exhaustive on purpose: a widened `RemoteLens`
@@ -1251,6 +1263,32 @@ export function RemotePrView({
   // The composer/thread-create side of the forge detection: a strict provider key
   // (default "github" — gh is the authoritative default for an unrecognized host).
   const providerKey: ForgeProvider = provider ?? "github";
+
+  // Prepare one selected file while the active request opens, rather than
+  // starting its committed versions only after the Files section mounts.
+  const contextDetails = targetDetails.isPlaceholderData
+    ? undefined
+    : targetDetails.data;
+  const contextPreferredPath =
+    hold.shownKey === entityKey ? selectedPath : savedDocument()?.selectedPath;
+  const contextPath =
+    contextDetails?.files.find((file) => file.path === contextPreferredPath)
+      ?.path ?? contextDetails?.files[0]?.path;
+  const contextHead =
+    contextDetails?.headSha ||
+    (contextDetails &&
+    !contextDetails.commitsUnknown &&
+    !contextDetails.commitsTruncated
+      ? prHeadSha(contextDetails)
+      : undefined);
+  usePrDiffContextWarmup({
+    repoPath,
+    number,
+    lens,
+    headSha: contextHead,
+    path: contextPath,
+    enabled: provider === "gitlab" && contextDetails !== undefined,
+  });
 
   // Palette-only PR actions — mounted here so they live only while a remote PR is
   // open. Every one whose enablement reads `details.data` also gates on
@@ -2957,6 +2995,7 @@ export function RemotePrView({
     (pr && !pr.commitsUnknown && !pr.commitsTruncated
       ? prHeadSha(pr)
       : undefined);
+  const chatIdentity = pr ? parseMrChatIdentity(pr.url, shownNumber) : null;
   const fileHistory = usePrFileHistory(
     JSON.stringify([repoPath, lens, shownNumber, fileHeadSha ?? null]),
     selectedPath ?? effectivePath,
@@ -3260,18 +3299,22 @@ export function RemotePrView({
   }, [hold.holding, showsLoadingFrame, shownNumber]);
   // Every arm renders inside the same host and frame, so the frame's focus sink
   // survives an arm swap and the hold dims whichever arm the held PR showed.
-  const framed = (content: ReactNode) => (
+  const chatCodeHostRef = useRef<HTMLDivElement>(null);
+  const framed = (content: ReactNode, sidebar?: ReactNode) => (
     <div
       ref={setHostNode}
       tabIndex={-1}
       className="flex h-full flex-col outline-none"
       {...heldParentProps(hold.holding)}
     >
-      <HeldFrame
-        holding={hold.holding}
-        className="flex h-full min-h-0 flex-col"
-      >
-        {content}
+      <HeldFrame holding={hold.holding} className="flex h-full min-h-0">
+        <div
+          ref={chatCodeHostRef}
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+        >
+          {content}
+        </div>
+        {sidebar}
       </HeldFrame>
     </div>
   );
@@ -5668,6 +5711,53 @@ export function RemotePrView({
         onConfirm={() => void discardPendingReview()}
       />
     </>,
+    aiEnabled && isSelectedPr && !detailsStale && chatIdentity ? (
+      <MrChatPane>
+        {({ onCollapse }) => (
+          <Suspense
+            fallback={
+              <aside className="h-full w-full min-w-0 border-l">
+                <LazyPanelFallback name="MR chat" />
+              </aside>
+            }
+          >
+            <MrChatSidebar
+              context={{
+                mr: chatIdentity,
+                repoPath,
+                url: pr.url,
+                title: pr.title,
+                body: pr.body,
+                baseRefName: pr.baseRefName,
+                headRefName: pr.headRefName,
+                headSha: fileHeadSha,
+                files: pr.files,
+                loadDiff: () =>
+                  import("./mr-chat/load-diff").then(({ loadMrChatDiff }) =>
+                    loadMrChatDiff(
+                      queryClient,
+                      {
+                        mr: chatIdentity,
+                        repoPath,
+                        headSha: fileHeadSha,
+                        baseRefName: pr.baseRefName,
+                        headRefName: pr.headRefName,
+                      },
+                      lens,
+                    ),
+                  ),
+              }}
+              lens={lens}
+              codeHostRef={chatCodeHostRef}
+              onCollapse={onCollapse}
+              enabled={
+                isSelectedPr && !detailsStale && hold.interactive && !diffStale
+              }
+            />
+          </Suspense>
+        )}
+      </MrChatPane>
+    ) : null,
   );
 }
 

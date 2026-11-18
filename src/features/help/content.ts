@@ -1616,6 +1616,10 @@ beside those controls move back and forward through visited files, restoring the
 file-list scope and revealing the selected file. Each MR tab keeps its own
 history when you leave Files and return. Selecting another file after going back
 starts a new history branch.
+Drag the boundary beside the file list to resize it. In split diff view, drag
+the divider between the old and new panes to change their relative widths.
+Both separators support keyboard arrows and Home/End, and keep your chosen sizes
+when you switch files.
 Switching scope starts with folders collapsed; expanding one folder shows its
 immediate children. Select a file to read its content.
 All files reads the complete tree at the request's head commit, fetching missing
@@ -1630,13 +1634,34 @@ complete before-and-after comparison, keeping unchanged lines and change
 highlights even when both versions are identical. In Diff view, click the context
 arrows above, between or below change blocks to reveal nearby code. These controls
 share the Local Changes diff renderer and use the selected MR file's pinned
-before-and-after versions; other files stay unloaded. A visible loading message
-tracks preparation and version reads. Finish or cancel an open line-comment draft before switching to
+before-and-after versions; other files stay unloaded. The active request prepares
+its selected file before Files mounts, and a visible loading message tracks
+preparation while the partial diff stays available. Retry a failed nearby-code
+read from that message. Finish or cancel an open line-comment draft before switching to
 Full file. Both file-scope and file-view toggles are also available from the
 command palette while Files is active. **Before / After** labels share the top
 toolbar with the view toggle. Its up/down arrows jump between change blocks in
 the file, including in Full file view. File and change navigation are also
 available from the command palette.
+
+{{ai}}The right-hand **MR chat** sidebar stays available across Conversation, Files and
+Review. Choose a CLI and model, then ask a question; the request's title,
+description, branches and changes accompany each message. Its session picker
+shows only ongoing chats for this exact request and checkout, including chats
+waiting for your next message. **New chat** starts a separate conversation;
+**End chat** removes that conversation from the ongoing list.
+Use **Collapse MR chat** to reclaim code space, then **Expand MR chat** to bring
+it back. Drag the chat's left boundary to resize it, or focus that separator and
+use the arrow keys. Your width, draft, attachments and running conversation are
+preserved when you collapse or expand the pane.
+
+Use **Attach current file** for the version you are viewing, or select code in a
+rendered diff or ordinary source view and choose **Attach selected code**. Attachment
+chips can be previewed and removed before sending. Large-source CodeMirror views
+support file attachments; their editor selections are not attached. Files and
+selections are tied to the request's commit snapshots, and AI-excluded files stay
+out of context. Chat uses a read-only CLI session and keeps running when you
+switch to another request.{{/ai}}
 
 Click an **import, module or include path** in Diff, Full file or source preview
 to open its target at the request's head commit and reveal it in the tree.

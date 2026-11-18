@@ -41,6 +41,7 @@ const INFRASTRUCTURE = "src/lib/plugin-store.ts";
 const DYNAMIC_MIGRATOR = "src/lib/repo-data-migration.ts";
 
 const ADOPTED = new Set([
+  "src/features/pulls/mr-chat/persistence.ts",
   "src/features/sessions/agentNumber.ts",
   "src/lib/ai/own-digest-store.ts",
   "src/lib/automations/dismissals.ts",

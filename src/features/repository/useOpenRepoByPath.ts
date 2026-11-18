@@ -3,6 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import { usePlanStore } from "@/features/plan/store";
+import { useMrChatStore } from "@/features/pulls/mr-chat/store";
 import { useResearchStore } from "@/features/research/store";
 import { track } from "@/lib/analytics";
 import { presentError } from "@/lib/error-summary";
@@ -236,6 +237,7 @@ export function useOpenRepoByPath() {
         // their debounced autosave writes the pre-migration paths back to disk.
         usePlanStore.getState().relocateRepoPath(oldPath, info.root);
         useResearchStore.getState().relocateRepoPath(oldPath, info.root);
+        useMrChatStore.getState().relocateRepoPath(oldPath, info.root);
         await recordOpenAndTrack(info, "relocate", stillCurrent);
       } catch (e) {
         if (isAppError(e) && e.kind === "notARepo") {

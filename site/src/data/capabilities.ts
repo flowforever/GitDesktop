@@ -351,6 +351,17 @@ export const capabilities: Capability[] = [
   {
     group: "Pull requests & review",
     label:
+      "Draggable file-list and old/new diff dividers with keyboard resizing and widths retained across files",
+  },
+  {
+    group: "AI · agents & sessions",
+    ai: true,
+    label:
+      "Collapsible, resizable MR chat — choose a CLI, include request context, attach pinned files or selected code, and list only this request's ongoing sessions",
+  },
+  {
+    group: "Pull requests & review",
+    label:
       "Toolbar arrows reveal changed files in the tree and navigate change blocks in partial and full-file diffs",
   },
   {

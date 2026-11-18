@@ -1185,6 +1185,30 @@ export const ACTIONS = [
 
   // Pull requests
   {
+    id: "mr-chat-focus",
+    label: "Focus MR chat",
+    category: "Pull requests",
+    defaultBinding: null,
+  },
+  {
+    id: "mr-chat-new",
+    label: "New MR chat",
+    category: "Pull requests",
+    defaultBinding: null,
+  },
+  {
+    id: "mr-chat-attach-file",
+    label: "Attach current file to MR chat",
+    category: "Pull requests",
+    defaultBinding: null,
+  },
+  {
+    id: "mr-chat-attach-selection",
+    label: "Attach selected code to MR chat",
+    category: "Pull requests",
+    defaultBinding: null,
+  },
+  {
     id: "create-pr",
     label: "Create pull request",
     category: "Pull requests",

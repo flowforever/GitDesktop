@@ -178,6 +178,7 @@ export function PrSourceFile({
       <SourceBody
         key={JSON.stringify([repoPath, headSha, path])}
         path={path}
+        headSha={headSha}
         content={content}
         importLinks={onOpenImport !== undefined}
       />
@@ -232,10 +233,12 @@ export function PrSourceFile({
 
 function SourceBody({
   path,
+  headSha,
   content,
   importLinks,
 }: {
   path: string;
+  headSha: string;
   content: SourceContent;
   importLinks: boolean;
 }) {
@@ -253,22 +256,31 @@ function SourceBody({
     case "image":
       return <SourceImage path={path} src={content.src} />;
     case "text":
-      return content.large ? (
-        <LargeSource
-          path={path}
-          text={content.text}
-          importLinks={importLinks}
-        />
-      ) : (
+      return (
         <div
-          tabIndex={0}
-          className="h-full overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+          className="h-full"
+          data-diff-file-path={path}
+          data-diff-head-sha={headSha}
+          data-diff-content-side="new"
         >
-          <HighlightedCode
-            path={path}
-            content={content.text}
-            htmlFallback={importLinks}
-          />
+          {content.large ? (
+            <LargeSource
+              path={path}
+              text={content.text}
+              importLinks={importLinks}
+            />
+          ) : (
+            <div
+              tabIndex={0}
+              className="h-full overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+            >
+              <HighlightedCode
+                path={path}
+                content={content.text}
+                htmlFallback={importLinks}
+              />
+            </div>
+          )}
         </div>
       );
   }

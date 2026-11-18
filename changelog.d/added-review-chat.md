@@ -1,0 +1,1 @@
+- Chat with a CLI in a collapsible, resizable MR sidebar, with request context, pinned file/code attachments, and a picker limited to that MR's ongoing sessions.

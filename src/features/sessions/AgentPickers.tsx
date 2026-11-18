@@ -65,10 +65,13 @@ export function ModelPicker({
   value,
   onChange,
   agent,
+  active,
 }: {
   value: string;
   onChange: (m: string) => void;
   agent: AgentKind;
+  /** Read-only conversations can render outside the Agent tab. */
+  active?: boolean;
 }) {
   // Listing a CLI's catalog spawns it, so the probe waits for intent to pick a
   // model — sticky, so the list stays put for the rest of the picker's life.
@@ -77,7 +80,7 @@ export function ModelPicker({
   // tab's <Activity>, whose hidden subtree already fetches nothing.
   const agentTabShowing = useUiStore((s) => s.repoTab === "agent");
   const available = useAgentModels(agent, {
-    enabled: wanted && agentTabShowing,
+    enabled: wanted && (active ?? agentTabShowing),
   });
   // Verbatim: the CLI orders its own catalog (opencode puts its providers
   // first, codex sorts by priority), and the fallback is that CLI's static

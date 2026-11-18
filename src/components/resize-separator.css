@@ -1,0 +1,34 @@
+.gd-resize-separator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.gd-resize-separator::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--border);
+  content: "";
+  transform: translateX(-50%);
+}
+
+.gd-resize-separator:hover::after,
+.gd-resize-separator:focus-visible::after,
+.gd-resize-separator[data-resizing]::after {
+  width: 2px;
+  background: var(--ring);
+}
+
+.gd-resize-separator:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}

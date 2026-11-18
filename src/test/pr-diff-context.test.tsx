@@ -2,8 +2,16 @@ import {
   onlineManager,
   QueryClient,
   QueryClientProvider,
+  useQuery,
 } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import {
@@ -23,6 +31,7 @@ import {
   gitPrSnapshotFiles,
   type PrSnapshotComparison,
 } from "@/lib/git/api/pr-snapshot";
+import { prSnapshotComparisonOptions } from "@/lib/git/queries/pr-snapshot";
 import type { FileDiff } from "@/lib/git/types";
 import { loadSettings } from "@/lib/settings/api";
 import { DEFAULT_SETTINGS } from "@/lib/settings/heal";
@@ -152,6 +161,7 @@ function mount(
   });
   return {
     ...view,
+    client,
     update(next: Partial<Props>) {
       props = { ...props, ...next };
       view.rerender(<PrFilesPane {...props} />);
@@ -194,6 +204,116 @@ afterEach(() => {
 });
 
 describe("MR Diff context expansion", () => {
+  it("shows nearby-code preparation without hiding the partial diff", async () => {
+    let resolvePair!: (pair: PrSnapshotComparison) => void;
+    comparison.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePair = resolve;
+        }),
+    );
+    mount();
+    const group = await screen.findByRole("group", { name: `Diff of ${PATH}` });
+    await waitFor(() => expect(group).toHaveTextContent("MR old first"));
+    expect(
+      screen.getByRole("status", { name: "Nearby code" }),
+    ).toHaveTextContent("Loading nearby code…");
+    expect(
+      within(group).queryByRole("button", { name: "Expand Up" }),
+    ).toBeNull();
+
+    await act(async () => resolvePair(fixture().pair));
+
+    await within(group).findAllByRole("button", { name: "Expand Up" });
+    expect(screen.queryByRole("status", { name: "Nearby code" })).toBeNull();
+    expect(group).not.toHaveTextContent("MR context 01");
+  });
+
+  it("retries nearby-code loading while keeping the displayed partial diff", async () => {
+    comparison.mockRejectedValueOnce(new Error("Temporary snapshot failure"));
+    mount();
+    const group = await screen.findByRole("group", { name: `Diff of ${PATH}` });
+    const retry = await screen.findByRole("button", {
+      name: "Retry loading nearby code",
+    });
+    expect(group).toHaveTextContent("MR old first");
+    expect(
+      within(group).queryByRole("button", { name: "Expand Up" }),
+    ).toBeNull();
+
+    await userEvent.click(retry);
+
+    await within(group).findAllByRole("button", { name: "Expand Up" });
+    expect(comparison).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole("button", { name: "Retry loading nearby code" }),
+    ).toBeNull();
+    expect(group).not.toHaveTextContent("MR context 01");
+  });
+
+  it("keeps the partial diff while nearby code waits for the connection", async () => {
+    onlineManager.setOnline(false);
+    mount();
+    const group = await screen.findByRole("group", { name: `Diff of ${PATH}` });
+    await waitFor(() => expect(group).toHaveTextContent("MR old first"));
+    expect(
+      screen.getByRole("status", { name: "Nearby code" }),
+    ).toHaveTextContent("nearby code will load once you're back online");
+    expect(comparison).not.toHaveBeenCalled();
+
+    await act(async () => onlineManager.setOnline(true));
+
+    await within(group).findAllByRole("button", { name: "Expand Up" });
+    expect(screen.queryByRole("status", { name: "Nearby code" })).toBeNull();
+    expect(group).not.toHaveTextContent("MR context 01");
+  });
+
+  it.each(["failed", "offline"] as const)(
+    "keeps verified nearby code usable through a %s background refresh",
+    async (refresh) => {
+      const view = mount();
+      const group = await screen.findByRole("group", {
+        name: `Diff of ${PATH}`,
+      });
+      await within(group).findAllByRole("button", { name: "Expand Up" });
+      const options = prSnapshotComparisonOptions(REPO, 17, HEAD, PATH);
+      const observed = renderHook(
+        () => useQuery({ ...options, enabled: false }),
+        {
+          wrapper: ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={view.client}>
+              {children}
+            </QueryClientProvider>
+          ),
+        },
+      );
+      if (refresh === "offline") onlineManager.setOnline(false);
+      else
+        comparison.mockRejectedValue(new Error("Background refresh failure"));
+
+      await act(async () => {
+        await view.client.invalidateQueries({
+          queryKey: options.queryKey,
+        });
+      });
+      await waitFor(() => {
+        if (refresh === "offline")
+          expect(observed.result.current.isPaused).toBe(true);
+        else expect(observed.result.current.isError).toBe(true);
+      });
+
+      expect(screen.queryByRole("status", { name: "Nearby code" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Retry loading nearby code" }),
+      ).toBeNull();
+      await userEvent.click(
+        within(group).getAllByRole("button", { name: "Expand Up" })[0],
+      );
+      expect(group).toHaveTextContent("MR context 18");
+      expect(group).not.toHaveTextContent("MR context 22");
+    },
+  );
+
   it.each([
     { label: "LF", eol: "\n" as const, mode: "unified" as const },
     { label: "CRLF", eol: "\r\n" as const, mode: "split" as const },
@@ -390,8 +510,12 @@ describe("MR Diff context expansion", () => {
     );
     expect(editor).toHaveValue("Unsaved review comment");
     expect(screen.queryByRole("button", { name: "Expand Up" })).toBeNull();
+    expect(
+      screen.getByRole("status", { name: "Nearby code" }),
+    ).toHaveTextContent("Loading nearby code…");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await screen.findAllByRole("button", { name: "Expand Up" });
+    expect(screen.queryByRole("status", { name: "Nearby code" })).toBeNull();
   });
 
   it("does not attach an old selection's late context to the next selected file", async () => {
