@@ -1,0 +1,1 @@
+- Remove the End chat button from the MR chat sidebar; New chat still starts a separate conversation.

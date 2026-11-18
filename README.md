@@ -473,8 +473,8 @@ in one click.
   includes the current request's context, and can attach the viewed file or
   selected diff/source code. Its session picker lists only ongoing chats for
   this request and checkout, including chats awaiting your next message.
-  **End chat** removes a conversation from that picker. The read-only chat stays
-  with the request as you switch sections. Collapse it to a narrow strip or drag
+  **New chat** starts a separate conversation. The read-only chat stays with
+  the request as you switch sections. Collapse it to a narrow strip or drag
   its left boundary to adjust its width; drafts, attachments and running chats
   are retained. AI-excluded files stay out of context.
 - **Follow imports while reviewing**: click an import, module or include path
@@ -1237,6 +1237,9 @@ touches your checkout.
   branch, open a local PR from it, or discard it.
 - **Several at once**: sessions organize into **Active** and **Kept** tabs,
   searchable, with a notification when each finishes.
+- **Defaults in Settings → AI**: choose a default harness, model and thinking
+  effort for new Sessions, Plans, Research runs and MR chats. Model and effort
+  are saved per harness; each composer can override them for its own run.
 - **Sandbox**: confine writes to a **Docker/Podman container** (or rely on
   each CLI's own worktree confinement on the host), pick worktree or
   container **per session** from the composer's **Options** (with an inline

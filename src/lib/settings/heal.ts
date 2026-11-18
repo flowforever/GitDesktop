@@ -4,12 +4,13 @@
 // inline `type` specifier's import as a real one.
 import { ALL_PROVIDER_IDS } from "@/lib/ai/providers";
 import { REVIEW_CONTEXT_SIZES } from "@/lib/ai/review-context-size";
-import { REVIEW_EFFORTS } from "@/lib/ai/review-effort";
+import { EFFORT_LEVELS, REVIEW_EFFORTS } from "@/lib/ai/review-effort";
 import { REVIEW_TIMEOUTS } from "@/lib/ai/review-timeout";
 import type { AiSettings } from "@/lib/ai/types";
 import type { ThemeSetting } from "@/lib/theme";
 import { healZoom, ZOOM_DEFAULT } from "@/lib/zoom/steps";
 import type {
+  AgentRunDefaults,
   AppSettings,
   ChannelPrefs,
   McpServer,
@@ -107,6 +108,8 @@ export const DEFAULT_AGENT_IDS = [
   "copilot",
   "opencode",
 ] as const;
+
+const AGENT_RUN_EFFORTS = ["", ...EFFORT_LEVELS] as const;
 
 /** The agent-session isolation modes offered in Settings. */
 export const AGENT_ISOLATIONS = ["worktree", "container"] as const;
@@ -278,6 +281,26 @@ const asObject = (v: unknown): Record<string, unknown> =>
     ? (v as Record<string, unknown>)
     : {};
 
+/** Custom model ids stay valid even when they are absent from a CLI's catalog. */
+export function healAgentRunDefaults(saved: unknown): AgentRunDefaults {
+  const stored = asObject(saved);
+  return {
+    model: typeof stored.model === "string" ? stored.model.trim() : "",
+    effort: pick(stored.effort, AGENT_RUN_EFFORTS, ""),
+  };
+}
+
+function healAgentDefaults(
+  saved: unknown,
+): NonNullable<AppSettings["agentDefaults"]> {
+  const stored = asObject(saved);
+  return Object.fromEntries(
+    DEFAULT_AGENT_IDS.filter((agent) => Object.hasOwn(stored, agent)).map(
+      (agent) => [agent, healAgentRunDefaults(stored[agent])],
+    ),
+  );
+}
+
 /** Builds a full source map from the manifest, which is the only enumeration of
  *  source keys — a new source therefore cannot be missed by a heal branch. */
 const mapSources = (
@@ -389,11 +412,14 @@ export function healNotifications(saved: unknown): NotificationSettings {
 function healEnumerated(settings: AppSettings): AppSettings {
   // Destructured out because an off-list agent must heal to ABSENT — that absence is
   // the meaningful "Auto" state, so a stand-in string would silently pin an agent.
-  const { defaultAgent, ...rest } = settings;
+  const { defaultAgent, agentDefaults, ...rest } = settings;
   return {
     ...rest,
     ...(defaultAgent && DEFAULT_AGENT_IDS.includes(defaultAgent)
       ? { defaultAgent }
+      : {}),
+    ...(agentDefaults !== undefined
+      ? { agentDefaults: healAgentDefaults(agentDefaults) }
       : {}),
     ai: healAi(settings.ai, DEFAULT_SETTINGS.ai),
     reviewAi: healAi(settings.reviewAi, DEFAULT_SETTINGS.reviewAi),

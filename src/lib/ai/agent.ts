@@ -1,5 +1,10 @@
 import { Channel } from "@tauri-apps/api/core";
-import type { AppSettings, McpServer } from "@/lib/settings/api";
+import type {
+  AgentRunDefaults,
+  AppSettings,
+  McpServer,
+} from "@/lib/settings/api";
+import { healAgentRunDefaults } from "@/lib/settings/heal";
 import { invoke } from "@/lib/tauri/invoke";
 import { type ChannelGate, createChannelGate } from "./stream-settle";
 import type { AiProviderId } from "./types";
@@ -184,7 +189,7 @@ export function kindProvider(kind: AgentKind): AiProviderId {
   return KIND_PROVIDERS[kind];
 }
 
-/** The agent a NEW session, plan, or research run starts on: the explicit
+/** The agent a NEW session, plan, research run, or MR chat starts on: the explicit
  *  Settings → AI default when set, else the main AI provider when it's an
  *  agent CLI, else Claude — including while settings are still loading. */
 export function defaultAgentKind(
@@ -194,6 +199,14 @@ export function defaultAgentKind(
   return (
     settings.defaultAgent ?? providerKind(settings.ai.provider) ?? "claude"
   );
+}
+
+/** Defaults for a new conversation using this harness; callers retain overrides. */
+export function agentDefaultsFor(
+  settings: Pick<AppSettings, "agentDefaults"> | null | undefined,
+  agent: AgentKind,
+): AgentRunDefaults {
+  return healAgentRunDefaults(settings?.agentDefaults?.[agent]);
 }
 
 /** Resolves the CLI binary and reports version + login status for Settings. */

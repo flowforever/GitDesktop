@@ -66,12 +66,18 @@ export function ModelPicker({
   onChange,
   agent,
   active,
+  id,
+  ariaLabel = "Agent model",
+  className,
 }: {
   value: string;
   onChange: (m: string) => void;
   agent: AgentKind;
   /** Read-only conversations can render outside the Agent tab. */
   active?: boolean;
+  id?: string;
+  ariaLabel?: string;
+  className?: string;
 }) {
   // Listing a CLI's catalog spawns it, so the probe waits for intent to pick a
   // model — sticky, so the list stays put for the rest of the picker's life.
@@ -108,12 +114,16 @@ export function ModelPicker({
       {/* Composer-toolbar weight: quiet until focus, matching the sibling
           Select-based pickers on the same row. */}
       <ComboboxInput
-        aria-label="Agent model"
+        id={id}
+        aria-label={ariaLabel}
         placeholder="Default model"
         // Long ids outrun the capped width with the caret hiding the tail, and
         // an input has no truncation tooltip of its own.
         title={value || undefined}
-        className="h-7 w-auto max-w-44 min-w-28 border-transparent text-muted-foreground hover:bg-muted dark:bg-transparent"
+        className={cn(
+          "h-7 w-auto max-w-44 min-w-28 border-transparent text-muted-foreground hover:bg-muted dark:bg-transparent",
+          className,
+        )}
         onFocus={() => setWanted(true)}
       />
       {/* The input is narrow, so the default `w-(--anchor-width)` popup clips
@@ -152,9 +162,15 @@ const EFFORT_ITEMS: Record<string, string> = {
 export function EffortPicker({
   value,
   onChange,
+  id,
+  ariaLabel = "Reasoning effort",
+  className,
 }: {
   value: string;
   onChange: (e: string) => void;
+  id?: string;
+  ariaLabel?: string;
+  className?: string;
 }) {
   return (
     <Select
@@ -163,9 +179,13 @@ export function EffortPicker({
       onValueChange={(v) => onChange(v === DEFAULT_EFFORT ? "" : String(v))}
     >
       <SelectTrigger
+        id={id}
         size="sm"
-        aria-label="Reasoning effort"
-        className="w-auto gap-1 border-0 text-muted-foreground shadow-none hover:bg-muted dark:bg-transparent"
+        aria-label={ariaLabel}
+        className={cn(
+          "w-auto gap-1 border-0 text-muted-foreground shadow-none hover:bg-muted dark:bg-transparent",
+          className,
+        )}
       >
         <GaugeIcon className="size-3.5" />
         <SelectValue />

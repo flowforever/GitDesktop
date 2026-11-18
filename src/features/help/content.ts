@@ -1648,8 +1648,7 @@ available from the command palette.
 Review. Choose a CLI and model, then ask a question; the request's title,
 description, branches and changes accompany each message. Its session picker
 shows only ongoing chats for this exact request and checkout, including chats
-waiting for your next message. **New chat** starts a separate conversation;
-**End chat** removes that conversation from the ongoing list.
+waiting for your next message. **New chat** starts a separate conversation.
 Use **Collapse MR chat** to reclaim code space, then **Expand MR chat** to bring
 it back. Drag the chat's left boundary to resize it, or focus that separator and
 use the arrow keys. Your width, draft, attachments and running conversation are
@@ -4122,12 +4121,16 @@ Left off, security audits use the review model. The choice applies to both autom
 and the **Security audit** button on a PR; picking a model in the PR panel still overrides
 both for that one run.
 
-**Default agent.** Under **Agent sessions**, *Default agent* decides which CLI a new
-**Session**, **Plan**, or **Research** run opens on. On **Auto** those runs follow the AI
-provider above whenever it's an agent CLI (and start on Claude when it isn't) — so
-choosing Codex as your provider starts your agent runs on Codex too. Pick an agent
-explicitly to pin it whatever the provider is. Either way it's only the starting point:
-the composer's agent picker still chooses per run.
+**Harness defaults.** Under **Agent sessions**, **Default harness** chooses the CLI
+for new **Sessions**, **Plans**, **Research** runs and **MR chats**. **Auto** follows
+the AI provider above when it is an agent CLI, and uses Claude otherwise. Choose
+a harness explicitly to keep it independent of that provider.
+
+**Default model** and **Thinking effort** are saved separately for each harness.
+Switch the harness to configure its own model and effort, then **Save changes**.
+You can type a custom model ID or leave the model blank to use the CLI's configured
+default; **Default** effort also leaves the choice to the CLI. A composer's own
+selections override these defaults, and existing conversations keep their choices.
 
 **Custom & LAN servers — allowed hosts.** To reach an Ollama or OpenAI-compatible server
 that isn't \`localhost\` (a box on your network, or a self-hosted endpoint), enter its URL in

@@ -993,7 +993,8 @@ export const capabilities: Capability[] = [
   {
     group: "AI · agents & sessions",
     ai: true,
-    label: "Default agent — pin one, or follow a CLI-agent AI provider",
+    label:
+      "Default harness, model and thinking effort in Settings — per-harness defaults for new Sessions, Plans, Research runs and MR chats",
   },
   {
     group: "AI · agents & sessions",

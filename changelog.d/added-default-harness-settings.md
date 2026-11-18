@@ -1,0 +1,1 @@
+- Set a default harness, model and thinking effort in Settings → AI for new Sessions, Plans, Research runs and MR chats, with separate model and effort preferences for each harness.

@@ -31,7 +31,11 @@ import {
   captureAgentSelection,
   clearAgentSelection,
 } from "@/features/sessions/agentSelect";
-import { type AgentKind, defaultAgentKind } from "@/lib/ai/agent";
+import {
+  type AgentKind,
+  agentDefaultsFor,
+  defaultAgentKind,
+} from "@/lib/ai/agent";
 import { formatUsd } from "@/lib/ai/cost";
 import { copyText } from "@/lib/clipboard";
 import { formatBinding } from "@/lib/hotkeys/binding";
@@ -225,14 +229,20 @@ export function ResearchComposer({
   // — no effect — so settings arriving late can't clobber a pick.
   const [agentPick, setAgentPick] = useState<AgentKind | null>(null);
   const agent: AgentKind = agentPick ?? defaultAgentKind(settings.data);
-  const [model, setModel] = useState("");
-  // The agent `model` was chosen for; null = nothing chosen yet. Any model id is
-  // accepted, so list membership can't decide whether one still fits the agent.
-  const [modelAgent, setModelAgent] = useState<AgentKind | null>(null);
-  const [effort, setEffort] = useState("");
-  // A model belongs to the agent it was chosen for; "" = the account default.
-  // Derived, so a default-agent change drops a model that agent wasn't given.
-  const modelForAgent = modelAgent === agent ? model : "";
+  const defaults = agentDefaultsFor(settings.data, agent);
+  // Null follows Settings; a picked empty string selects the CLI's own default.
+  const [modelPick, setModelPick] = useState<{
+    agent: AgentKind;
+    value: string;
+  } | null>(null);
+  const [effortPick, setEffortPick] = useState<{
+    agent: AgentKind;
+    value: string;
+  } | null>(null);
+  const modelForAgent =
+    modelPick?.agent === agent ? modelPick.value : defaults.model;
+  const effort =
+    effortPick?.agent === agent ? effortPick.value : defaults.effort;
 
   // `agent` follows the Settings default until an explicit pick, so a submit
   // before settings resolve would run the fallback agent. Held silently for those
@@ -289,19 +299,21 @@ export function ResearchComposer({
               value={agent}
               onChange={(a) => {
                 setAgentPick(a);
-                setModel(""); // model lists differ between agents
-                setModelAgent(null);
+                setModelPick(null);
+                setEffortPick(null);
               }}
             />
             <ModelPicker
               value={modelForAgent}
               onChange={(m) => {
-                setModel(m);
-                setModelAgent(agent);
+                setModelPick({ agent, value: m });
               }}
               agent={agent}
             />
-            <ComposerOptions effort={effort} onEffort={setEffort} />
+            <ComposerOptions
+              effort={effort}
+              onEffort={(value) => setEffortPick({ agent, value })}
+            />
             <div className="ml-auto flex items-center gap-2">
               <span className="hidden truncate text-[11px] text-muted-foreground sm:inline">
                 {formatBinding("mod+enter")} to research

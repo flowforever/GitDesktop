@@ -98,6 +98,59 @@ test("watched merge request healing preserves saved values without truncating", 
   assertIdempotent(healLoadedSettings, healed);
 });
 
+test("agent run defaults stay absent until configured", () => {
+  for (const saved of [undefined, null, {}, { agentDefaults: undefined }]) {
+    assert.equal("agentDefaults" in healLoadedSettings(saved), false);
+  }
+  assert.equal("agentDefaults" in DEFAULT_SETTINGS, false);
+});
+
+test("agent defaults reject malformed maps and normalize malformed rows", () => {
+  for (const agentDefaults of [null, true, 42, "codex", [], ["codex"]]) {
+    assert.deepEqual(healLoadedSettings({ agentDefaults }).agentDefaults, {});
+  }
+  assert.deepEqual(
+    healLoadedSettings({
+      agentDefaults: { claude: null, codex: [], copilot: 42, opencode: "high" },
+    }).agentDefaults,
+    {
+      claude: { model: "", effort: "" },
+      codex: { model: "", effort: "" },
+      copilot: { model: "", effort: "" },
+      opencode: { model: "", effort: "" },
+    },
+  );
+});
+
+test("agent default healing preserves custom models and every supported effort", () => {
+  for (const effort of ["", "low", "medium", "high", "xhigh"]) {
+    assert.deepEqual(
+      healLoadedSettings({
+        agentDefaults: {
+          opencode: { model: "custom-provider/team:model@preview", effort },
+        },
+      }).agentDefaults,
+      { opencode: { model: "custom-provider/team:model@preview", effort } },
+    );
+  }
+});
+
+test("agent default healing does not mutate saved or fallback settings", () => {
+  const agentDefaults = Object.freeze({
+    claude: Object.freeze({ model: " custom/model ", effort: "high" }),
+    codex: Object.freeze({ model: "codex-private", effort: "invalid" }),
+  });
+  const saved = Object.freeze({ agentDefaults });
+  const before = stableStringify(saved);
+  const fallback = stableStringify(DEFAULT_SETTINGS);
+  assert.deepEqual(healLoadedSettings(saved).agentDefaults, {
+    claude: { model: "custom/model", effort: "high" },
+    codex: { model: "codex-private", effort: "" },
+  });
+  assert.equal(stableStringify(saved), before);
+  assert.equal(stableStringify(DEFAULT_SETTINGS), fallback);
+});
+
 // Committed objects as the writers build them: a form draft or a `trimmed ||
 // undefined` alias leaves undefined-valued keys that JSON storage drops.
 const UNDEFINED_TOP = {
@@ -166,6 +219,15 @@ const FIXTURES = {
   securityPresent: { securityReviewAi: { provider: "openai" } },
   mcpServers: { mcpServers: MCP_ARRAY },
   mcpJunkContainer: { mcpServers: { not: "an array" } },
+  agentDefaults: {
+    agentDefaults: {
+      claude: { model: " custom/claude ", effort: "medium" },
+      codex: { model: undefined, effort: "xhigh" },
+      copilot: { model: "custom/copilot", effort: undefined },
+      opencode: { model: 42, effort: "turbo" },
+      unknown: { model: "foreign", effort: "high" },
+    },
+  },
   empty: undefined,
 };
 
@@ -300,6 +362,14 @@ const BRANCH_CHECKS = {
     assert.equal(valid.theme, "slate");
     assert.equal(valid.defaultAgent, "codex");
   },
+  "agent defaults heal per harness and discard unknown harnesses": (heal) => {
+    assert.deepEqual(heal(FIXTURES.agentDefaults).agentDefaults, {
+      claude: { model: "custom/claude", effort: "medium" },
+      codex: { model: "", effort: "xhigh" },
+      copilot: { model: "custom/copilot", effort: "" },
+      opencode: { model: "", effort: "" },
+    });
+  },
   "an off-list AI provider re-pairs provider and model": (heal) => {
     const healed = heal({
       ai: { provider: "skynet", model: "t-800", ollamaBaseUrl: "http://lan:1" },
@@ -368,6 +438,9 @@ const BRANCH_MUTANTS = {
   "off-list enums heal to their defaults, an off-list agent to absent": [
     ["  return healEnumerated({", "  return ({"],
   ],
+  "agent defaults heal per harness and discard unknown harnesses": [
+    ["  return healEnumerated({", "  return ({"],
+  ],
   // Healing the provider alone keeps the foreign model.
   "an off-list AI provider re-pairs provider and model": [
     [
@@ -428,7 +501,10 @@ test("heal.ts names ./api and @/lib/theme only through import type declarations"
   // NEGATIVE CONTROLS: an inline `type` specifier keeps a real import under
   // Node's type stripping, and so does a plain one.
   for (const [from, to] of [
-    ["import type {\n  AppSettings,", "import {\n  type AppSettings,"],
+    [
+      "import type {\n  AgentRunDefaults,",
+      "import {\n  type AgentRunDefaults,",
+    ],
     [
       'import type { ThemeSetting } from "@/lib/theme";',
       'import { type ThemeSetting } from "@/lib/theme";',

@@ -14,9 +14,10 @@ import {
   type MrChatSession,
   useMrChatStore,
 } from "@/features/pulls/mr-chat/store";
-import type { AgentSessionArgs } from "@/lib/ai/agent";
+import type { AgentKind, AgentSessionArgs } from "@/lib/ai/agent";
 import type { PrSnapshotComparison } from "@/lib/git/api/pr-snapshot";
 import { prSnapshotComparisonOptions } from "@/lib/git/queries/pr-snapshot";
+import type { AppSettings } from "@/lib/settings/api";
 import { DEFAULT_SETTINGS } from "@/lib/settings/heal";
 import { settingsKeys } from "@/lib/settings/queries";
 import { useDiffLayoutStore } from "@/lib/stores/diff-layout";
@@ -161,14 +162,26 @@ afterEach(() => {
   document.getSelection()?.removeAllRanges();
 });
 
-function mountSidebar(current = context, collapsible = false) {
+function mountSidebar(
+  current = context,
+  collapsible = false,
+  preferences: Partial<AppSettings> = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   client.setQueryData(settingsKeys.settings, {
     ...DEFAULT_SETTINGS,
     defaultAgent: "codex",
+    ...preferences,
   });
+  for (const agent of [
+    "claude",
+    "codex",
+    "copilot",
+    "opencode",
+  ] satisfies AgentKind[])
+    client.setQueryData(["agent-models", agent], { models: [], live: false });
   clients.push(client);
   const host = document.createElement("div");
   codeHosts.push(host);
@@ -487,17 +500,16 @@ describe("MR chat scope", () => {
     expect(request.userPrompt).not.toContain("secrets.env");
   });
 
-  it("ends an idle conversation and removes it from ongoing sessions", async () => {
-    const user = userEvent.setup();
+  it("keeps the active conversation available without an End chat control", () => {
     useMrChatStore.setState({
       sessions: [savedSession("Current conversation")],
     });
     mountSidebar();
-    await user.click(screen.getByRole("button", { name: "End chat" }));
     expect(
-      screen.queryByText("Current conversation answer"),
+      screen.queryByRole("button", { name: "End chat" }),
     ).not.toBeInTheDocument();
-    expect(useMrChatStore.getState().sessions[0].state).toBe("completed");
+    expect(screen.getByText("Current conversation answer")).toBeInTheDocument();
+    expect(useMrChatStore.getState().sessions[0].state).toBe("active");
   });
 
   it("keeps an in-flight response scoped to its MR while another MR is visible", async () => {
@@ -613,6 +625,138 @@ describe("MR chat scope", () => {
     expect(
       screen.getByRole("button", { name: "Send message" }),
     ).not.toHaveAttribute("aria-disabled", "true");
+  });
+});
+
+describe("MR chat harness defaults", () => {
+  const preferences: Partial<AppSettings> = {
+    defaultAgent: "codex",
+    agentDefaults: {
+      codex: { model: "configured-codex", effort: "high" },
+      claude: { model: "configured-claude", effort: "medium" },
+    },
+  };
+
+  async function send(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(
+      screen.getByRole("textbox", { name: "Message about this MR" }),
+      "Explain this MR",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(external.run).toHaveBeenCalledTimes(1));
+  }
+
+  async function chooseEffort(
+    user: ReturnType<typeof userEvent.setup>,
+    label: string,
+  ) {
+    await user.click(
+      screen.getByRole("combobox", { name: "Reasoning effort" }),
+    );
+    await user.click(await screen.findByRole("option", { name: label }));
+  }
+
+  it("starts a new MR conversation with the configured model and thinking effort", async () => {
+    const user = userEvent.setup();
+    mountSidebar(context, false, preferences);
+    expect(screen.getByRole("combobox", { name: "Agent model" })).toHaveValue(
+      "configured-codex",
+    );
+    await send(user);
+    expect(external.run.mock.calls[0][0]).toMatchObject({
+      agent: "codex",
+      model: "configured-codex",
+      effort: "high",
+    });
+  });
+
+  it("derives fresh settings while a new MR conversation has no explicit overrides", async () => {
+    const user = userEvent.setup();
+    const sidebar = mountSidebar(context, false, preferences);
+    act(() =>
+      sidebar.client.setQueryData(settingsKeys.settings, {
+        ...DEFAULT_SETTINGS,
+        ...preferences,
+        agentDefaults: {
+          ...preferences.agentDefaults,
+          codex: { model: "updated-codex", effort: "xhigh" },
+        },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Agent model" })).toHaveValue(
+        "updated-codex",
+      ),
+    );
+    await send(user);
+    expect(external.run.mock.calls[0][0]).toMatchObject({
+      model: "updated-codex",
+      effort: "xhigh",
+    });
+  });
+
+  it("preserves explicit native-default blanks when MR settings change", async () => {
+    const user = userEvent.setup();
+    const sidebar = mountSidebar(context, false, preferences);
+    const model = screen.getByRole("combobox", { name: "Agent model" });
+    expect(model).toHaveValue("configured-codex");
+    await user.clear(model);
+    await user.keyboard("{Escape}");
+    await chooseEffort(user, "Default");
+    act(() =>
+      sidebar.client.setQueryData(settingsKeys.settings, {
+        ...DEFAULT_SETTINGS,
+        ...preferences,
+        agentDefaults: {
+          ...preferences.agentDefaults,
+          codex: { model: "updated-codex", effort: "xhigh" },
+        },
+      }),
+    );
+    await send(user);
+    expect(external.run.mock.calls[0][0]).toMatchObject({
+      model: "",
+      effort: "",
+    });
+  });
+
+  it("uses the next harness defaults without carrying the prior model or effort pick", async () => {
+    const user = userEvent.setup();
+    mountSidebar(context, false, preferences);
+    const model = screen.getByRole("combobox", { name: "Agent model" });
+    await user.clear(model);
+    await user.type(model, "manual-codex");
+    await user.keyboard("{Escape}");
+    await chooseEffort(user, "Low");
+    await user.click(screen.getByRole("combobox", { name: "Agent" }));
+    await user.click(await screen.findByRole("option", { name: "Claude" }));
+    await waitFor(() => expect(model).toHaveValue("configured-claude"));
+    await send(user);
+    expect(external.run.mock.calls[0][0]).toMatchObject({
+      agent: "claude",
+      model: "configured-claude",
+      effort: "medium",
+    });
+  });
+
+  it.each([
+    { model: "saved-session-model", effort: "low" },
+    { model: "", effort: "" },
+  ])("keeps an existing MR session's saved picks %j", async (saved) => {
+    useMrChatStore.setState({
+      sessions: [savedSession("existing-defaults", saved)],
+    });
+    const user = userEvent.setup();
+    mountSidebar(context, false, { ...preferences, defaultAgent: "claude" });
+    expect(screen.getByRole("combobox", { name: "Agent model" })).toHaveValue(
+      saved.model,
+    );
+    await send(user);
+    expect(external.run.mock.calls[0][0]).toMatchObject({
+      agent: "codex",
+      model: saved.model,
+      effort: saved.effort,
+    });
   });
 });
 

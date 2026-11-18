@@ -24,7 +24,11 @@ import {
   ModelPicker,
 } from "@/features/sessions/AgentPickers";
 import { SessionConversationView } from "@/features/sessions/SessionConversationView";
-import { type AgentKind, defaultAgentKind } from "@/lib/ai/agent";
+import {
+  type AgentKind,
+  agentDefaultsFor,
+  defaultAgentKind,
+} from "@/lib/ai/agent";
 import { splitUnifiedDiff } from "@/lib/git/diff-split";
 import {
   prSnapshotComparisonOptions,
@@ -94,11 +98,21 @@ function ScopedMrChat({
       : sessions.find((entry) => entry.id === selectedId);
   const [agentPick, setAgentPick] = useState<AgentKind | null>(null);
   const agent = session?.agent ?? agentPick ?? defaultAgentKind(settings.data);
-  const [startModel, setStartModel] = useState("");
-  const [modelAgent, setModelAgent] = useState<AgentKind | null>(null);
-  const [startEffort, setStartEffort] = useState("");
-  const model = session?.model ?? (modelAgent === agent ? startModel : "");
-  const effort = session?.effort ?? startEffort;
+  const defaults = agentDefaultsFor(settings.data, agent);
+  const [startModel, setStartModel] = useState<{
+    agent: AgentKind;
+    value: string;
+  } | null>(null);
+  const [startEffort, setStartEffort] = useState<{
+    agent: AgentKind;
+    value: string;
+  } | null>(null);
+  const model =
+    session?.model ??
+    (startModel?.agent === agent ? startModel.value : defaults.model);
+  const effort =
+    session?.effort ??
+    (startEffort?.agent === agent ? startEffort.value : defaults.effort);
   const draft = useMrTextDraft(
     `${mrChatKey(context.mr)}|chat|${context.repoPath}|${session?.id ?? "new"}`,
   );
@@ -495,8 +509,8 @@ function ScopedMrChat({
             value={agent}
             onChange={(value) => {
               setAgentPick(value);
-              setStartModel("");
-              setModelAgent(null);
+              setStartModel(null);
+              setStartEffort(null);
             }}
           />
         )}
@@ -507,10 +521,7 @@ function ScopedMrChat({
           onChange={(value) => {
             if (session)
               useMrChatStore.getState().setModel(session.id, context, value);
-            else {
-              setStartModel(value);
-              setModelAgent(agent);
-            }
+            else setStartModel({ agent, value });
           }}
         />
         <EffortPicker
@@ -518,7 +529,7 @@ function ScopedMrChat({
           onChange={(value) => {
             if (session)
               useMrChatStore.getState().setEffort(session.id, context, value);
-            else setStartEffort(value);
+            else setStartEffort({ agent, value });
           }}
         />
         <div className="flex-1" />
@@ -598,21 +609,6 @@ function ScopedMrChat({
               sizeToContent
             />
           </div>
-          {session && (
-            <DisabledReasonButton
-              variant="ghost"
-              size="xs"
-              disabled={session.running}
-              reason="Stop the current response before ending this chat."
-              onClick={() => {
-                draft.set("");
-                useMrChatStore.getState().complete(session.id, context);
-                newChat();
-              }}
-            >
-              End chat
-            </DisabledReasonButton>
-          )}
         </div>
       )}
       {!hydrated && !loadError ? (

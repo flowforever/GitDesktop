@@ -149,8 +149,10 @@ export interface PendingTask {
    *  followed), which would otherwise leave the restore unable to tell a model
    *  that still fits from one aimed at the agent the user just moved away from. */
   modelAgent?: "claude" | "codex" | "copilot" | "opencode";
-  /** "" = Auto. */
+  /** "" = the CLI's own effort default. */
   effort?: string;
+  /** The harness an explicit effort pick belongs to across a Settings visit. */
+  effortAgent?: "claude" | "codex" | "copilot" | "opencode";
   mode?: "single" | "ensemble";
   /** Stashed verbatim — `null` is meaningful (follow the per-repo default set),
    *  and is NOT the same as absent. */

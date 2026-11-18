@@ -242,6 +242,11 @@ export const IMAGE_AGENT_IDS = [
   "copilot",
 ] as const;
 
+export interface AgentRunDefaults {
+  model: string;
+  effort: string;
+}
+
 export interface AppSettings {
   ai: AiSettings;
   /** Provider/model for AI PR review (independent of the commit model). */
@@ -272,12 +277,17 @@ export interface AppSettings {
   /** Hide the app to the system tray on window close (so background work keeps
    *  running) instead of quitting. */
   closeToTray: boolean;
-  /** Which agent CLI a new Session, Plan, or Research run starts on. Not in
+  /** Which agent CLI a new Session, Plan, Research run, or MR chat starts on. Not in
    *  DEFAULT_SETTINGS — its absence is the meaningful "Auto" state: follow the
    *  main AI provider when that's an agent CLI, else Claude. Keyed to the local
    *  DEFAULT_AGENT_IDS rather than lib/ai's `AgentKind` (the sessions store does the
    *  same) because `lib/ai/agent.ts` imports this module — see that list. */
   defaultAgent?: (typeof DEFAULT_AGENT_IDS)[number];
+  /** Per-harness model and thinking effort for new conversations. Empty fields
+   *  keep the CLI's configured defaults; existing conversations keep their picks. */
+  agentDefaults?: Partial<
+    Record<(typeof DEFAULT_AGENT_IDS)[number], AgentRunDefaults>
+  >;
   /** How write-capable agent sessions are isolated. "worktree" = the throwaway
    *  git worktree only (host, full-auto); "container" = also run inside an
    *  ephemeral Docker/Podman container for kernel-enforced filesystem

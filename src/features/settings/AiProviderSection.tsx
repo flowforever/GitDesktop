@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { CopyIconButton } from "@/components/CopyIconButton";
+import { usePanelActive } from "@/components/panel-portal";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -39,7 +40,16 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { type AgentKind, detectAgentCli, providerKind } from "@/lib/ai/agent";
+import {
+  ModelPicker as AgentModelPicker,
+  EffortPicker,
+} from "@/features/sessions/AgentPickers";
+import {
+  type AgentKind,
+  agentDefaultsFor,
+  detectAgentCli,
+  providerKind,
+} from "@/lib/ai/agent";
 import {
   entryMatchesUrl,
   isHostAllowed,
@@ -707,6 +717,23 @@ export const AiProviderSection = withForm({
     );
     // `undefined` = Auto (no explicit default; new runs follow `ai.provider`).
     const defaultAgent = useSelector(form.store, (s) => s.values.defaultAgent);
+    const agentDefaults = useSelector(
+      form.store,
+      (s) => s.values.agentDefaults,
+    );
+    const defaultHarness =
+      defaultAgent ?? providerKind(ai.provider) ?? "claude";
+    const runDefaults = agentDefaultsFor({ agentDefaults }, defaultHarness);
+    const panelActive = usePanelActive();
+    function setRunDefault(field: "model" | "effort", value: string) {
+      form.setFieldValue("agentDefaults", (current) => ({
+        ...current,
+        [defaultHarness]: {
+          ...agentDefaultsFor({ agentDefaults: current }, defaultHarness),
+          [field]: value,
+        },
+      }));
+    }
     const agentIsolation = useSelector(
       form.store,
       (s) => s.values.agentIsolation,
@@ -1216,12 +1243,12 @@ export const AiProviderSection = withForm({
           <div>
             <h3 className="text-sm font-medium">Agent sessions</h3>
             <p className="text-xs text-muted-foreground">
-              How new agent runs start — the agent that runs them, and how
-              sessions are isolated.
+              Defaults for new MR chats, Session, Plan, and Research runs.
+              Existing conversations keep their model and thinking effort.
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="default-agent">Default agent</Label>
+            <Label htmlFor="default-agent">Default harness</Label>
             <Select
               items={DEFAULT_AGENT_ITEMS}
               value={defaultAgent ?? "auto"}
@@ -1250,8 +1277,34 @@ export const AiProviderSection = withForm({
             </Select>
             <p className="text-xs text-muted-foreground">
               {defaultAgent
-                ? `New Session, Plan, and Research runs start on ${DEFAULT_AGENT_ITEMS[defaultAgent]}.`
-                : `New Session, Plan, and Research runs follow the AI provider above when it's an agent CLI — right now they start on ${DEFAULT_AGENT_ITEMS[providerKind(ai.provider) ?? "claude"]}.`}
+                ? `New runs start with ${DEFAULT_AGENT_ITEMS[defaultAgent]}.`
+                : `Auto currently uses ${DEFAULT_AGENT_ITEMS[defaultHarness]}. It follows the AI provider above when that provider is a CLI, and uses Claude for API providers.`}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="default-agent-model">Default model</Label>
+            <AgentModelPicker
+              id="default-agent-model"
+              ariaLabel="Default model"
+              agent={defaultHarness}
+              active={panelActive}
+              value={runDefaults.model}
+              onChange={(value) => setRunDefault("model", value)}
+              className="h-8 w-full max-w-none min-w-0 border-input bg-background text-foreground dark:bg-input/30"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="default-agent-effort">Thinking effort</Label>
+            <EffortPicker
+              id="default-agent-effort"
+              ariaLabel="Thinking effort"
+              value={runDefaults.effort}
+              onChange={(value) => setRunDefault("effort", value)}
+              className="h-8 w-full border border-input bg-background text-foreground data-[size=sm]:h-8 dark:bg-input/30"
+            />
+            <p className="text-xs text-muted-foreground">
+              Leave the model and effort at Default to use the harness's own
+              settings.
             </p>
           </div>
           <div className="space-y-2">

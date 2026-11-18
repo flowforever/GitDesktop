@@ -12,7 +12,11 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { clampHighlight } from "@/features/shortcuts/palette-highlight";
-import { type AgentKind, defaultAgentKind } from "@/lib/ai/agent";
+import {
+  type AgentKind,
+  agentDefaultsFor,
+  defaultAgentKind,
+} from "@/lib/ai/agent";
 import { estimateRunCost } from "@/lib/ai/cost";
 import type { ContainerStatus } from "@/lib/ai/sandbox";
 import { useContainerStatus } from "@/lib/ai/sandbox-queries";
@@ -207,16 +211,23 @@ export function SessionComposer({
     null,
   );
   const [startEffort, setStartEffort] = useState("");
+  const [startEffortAgent, setStartEffortAgent] = useState<AgentKind | null>(
+    null,
+  );
   // An explicit pick for a NEW session; null = follow the Settings default.
   // Derived during render — no effect — so settings arriving late can't clobber
   // a pick, and a later Settings change moves the unpicked default.
   const [startAgentPick, setStartAgentPick] = useState<AgentKind | null>(null);
   const startAgent: AgentKind =
     startAgentPick ?? defaultAgentKind(settings.data);
+  const startDefaults = agentDefaultsFor(settings.data, startAgent);
   // A model belongs to the agent it was chosen for; "" = the account default.
   // Derived, so every path that can move the agent — the picker, a stash restore,
   // settings landing — drops a model that agent wasn't given.
-  const startModelForAgent = startModelAgent === startAgent ? startModel : "";
+  const startModelForAgent =
+    startModelAgent === startAgent ? startModel : startDefaults.model;
+  const startEffortForAgent =
+    startEffortAgent === startAgent ? startEffort : startDefaults.effort;
   // MCP servers opted into for a NEW session. null = "use the default" (every
   // enabled registry server); a concrete array once the user picks. Frozen at
   // turn 1, so it only matters before a session exists.
@@ -266,10 +277,13 @@ export function SessionComposer({
       };
   // Effort is changeable mid-session (like model). Mapped per-CLI in Rust (Codex
   // config, Copilot/opencode flags, Claude thinking keyword).
-  const effort = session ? session.effort : startEffort;
+  const effort = session ? session.effort : startEffortForAgent;
   const onEffort = session
     ? (e: string) => setEffort(session.id, e)
-    : setStartEffort;
+    : (e: string) => {
+        setStartEffort(e);
+        setStartEffortAgent(startAgent);
+      };
   // Your sent prompts, oldest→newest, for Up/Down recall.
   const history = session ? session.turns.map((t) => t.prompt) : [];
 
@@ -331,7 +345,10 @@ export function SessionComposer({
       // model, so it's released rather than re-aimed at whatever agent now applies.
       setStartModelAgent(pendingTask.modelAgent ?? pendingTask.agent ?? null);
     }
-    if (pendingTask.effort !== undefined) setStartEffort(pendingTask.effort);
+    if (pendingTask.effort !== undefined) {
+      setStartEffort(pendingTask.effort);
+      setStartEffortAgent(pendingTask.effortAgent ?? pendingTask.agent ?? null);
+    }
     if (pendingTask.mode !== undefined) setMode(pendingTask.mode);
     if (pendingTask.mcpServers !== undefined)
       setStartMcp(pendingTask.mcpServers);
@@ -491,11 +508,12 @@ export function SessionComposer({
       // the stale derived one.
       isolation: startIsolation ?? undefined,
       agent: startAgentPick ?? undefined,
-      model: startModel,
+      model: startModelAgent === null ? undefined : startModel,
       // Pinned even when the agent isn't: the model has to come back knowing
       // which agent it was for, or the restore can't tell it still fits.
       modelAgent: startModelAgent ?? undefined,
-      effort: startEffort,
+      effort: startEffortAgent === null ? undefined : startEffort,
+      effortAgent: startEffortAgent ?? undefined,
       mode,
       // Verbatim: null here MEANS "follow the default set", so it must survive.
       mcpServers: startMcp,
@@ -591,7 +609,7 @@ export function SessionComposer({
         text,
         startModelForAgent,
         startAgent,
-        startEffort,
+        startEffortForAgent,
         undefined,
         // MCP runs in the supported (agent, isolation) combos — pass only the
         // agent-runnable picks (the rest are filtered out for this agent).
@@ -974,6 +992,7 @@ export function SessionComposer({
                     setStartAgentPick(a);
                     setStartModel(""); // model lists differ between agents
                     setStartModelAgent(null);
+                    setStartEffortAgent(null);
                     setStartMcp(null); // re-derive the new agent's default servers
                   }}
                 />
@@ -1064,7 +1083,7 @@ export function SessionComposer({
         seed={{
           agent: startAgent,
           model: startModelForAgent,
-          effort: startEffort,
+          effort: startEffortForAgent,
         }}
         estimate={costEstimate}
         // Only a containerized run can fail on image membership; undefined means

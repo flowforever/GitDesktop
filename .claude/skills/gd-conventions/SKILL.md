@@ -1457,6 +1457,10 @@ one grep away on the named symbol. Grows via Conventions-sync.
   settings mutation started. Raw api writers that bypass the hooks invalidate
   the cache themselves. The queries.ts pin in
   `scripts/settings-cache-seed.test.mjs` enforces the spread.
+- **New CLI conversations** resolve the harness with `defaultAgentKind` and its
+  model/effort with `agentDefaultsFor(settings, harness)`. An untouched composer
+  follows these per-harness defaults; an explicit empty pick uses the CLI's own
+  default. Existing conversations retain their stored values.
 - **Per-record repo scope** — a record offered per-repo-or-globally carries a
   `scope` string: the `"global"` sentinel (also the absent-value default) or
   an identity key. Reads match BOTH key forms (raw + identity, most-preferred
