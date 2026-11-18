@@ -61,13 +61,18 @@ import {
   useSlotRetained,
   useSlotWidget,
 } from "@/features/diff/file-slot";
+import { subscribeLineComposer } from "@/features/diff/line-composer-store";
 import {
   LAYOUT_COMPOSER_HELD,
   lineComposerOpen,
 } from "@/features/diff/whitespace-mode";
 import { TimeTrackingControls } from "@/features/issues/RemoteIssueViewParts";
 import { presentError } from "@/lib/error-summary";
-import { sectionIsBinary, sectionOldFilePath } from "@/lib/git/diff-split";
+import {
+  classifyHeaderOnlyDiff,
+  sectionIsBinary,
+  sectionOldFilePath,
+} from "@/lib/git/diff-split";
 import { FULL_OID_RE } from "@/lib/git/oid";
 import {
   type PendingThreadWrites,
@@ -87,10 +92,13 @@ import { ACT_PENDING_REASON } from "@/lib/offline-writes";
 import type { ReviewDraft } from "@/lib/pulls/review-drafts";
 import { useUiStore } from "@/lib/stores/ui";
 import { cn } from "@/lib/utils";
+import type { MrChatFileNavigationRequest } from "./mr-chat/useMrChatFileNavigation";
 import { DraftCommentCard } from "./PendingReviewBar";
 import { PrChangedFilesNav } from "./PrChangedFilesNav";
 import { PrChangesNav } from "./PrChangesNav";
+import { PrChatFileNavigation } from "./PrChatFileNavigation";
 import { PrCodeImportLinks } from "./PrCodeImportLinks";
+import { PrFileContextMarker } from "./PrFileContextMarker";
 import { PrFilesTree, type PrTreeFile } from "./PrFilesTree";
 import { PrFullFileLoading } from "./PrFullFileLoading";
 import { PrImportTargetPicker } from "./PrImportTargetPicker";
@@ -138,17 +146,6 @@ type PrFileView =
       lens: RemoteLens;
       number: number;
     };
-
-function subscribeLineComposer(onChange: () => void) {
-  const observer = new MutationObserver(onChange);
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["data-diff-line-widget"],
-  });
-  return () => observer.disconnect();
-}
 
 const ignoreSlotRead = () => undefined;
 
@@ -261,6 +258,8 @@ export function PrFilesPane({
   changesIncomplete = false,
   interactionEnabled = true,
   fileHistory,
+  navigationRequest,
+  onNavigationConsumed,
 }: {
   files: PrFile[];
   /** Rows to show as binary (`binaryRowPaths`: 0/0 forge counts over a marker
@@ -297,6 +296,8 @@ export function PrFilesPane({
   interactionEnabled?: boolean;
   /** Owned above the Files section so visits and scope survive its remount. */
   fileHistory?: PrFileHistory;
+  navigationRequest?: MrChatFileNavigationRequest;
+  onNavigationConsumed?: (id: string) => void;
 } & DiffThreadWiring) {
   const diffEntity = `${lens ?? ""}#${number ?? ""}`;
   const scopeKey = JSON.stringify([repoPath, diffEntity, blameRev ?? null]);
@@ -770,6 +771,29 @@ export function PrFilesPane({
           </div>
         )}
         <div ref={contentRef} className="min-h-0 flex-1">
+          <PrChatFileNavigation
+            request={navigationRequest}
+            scope={{
+              repoPath: repoPath ?? "",
+              number: number ?? 0,
+              lens: lens ?? "origin",
+              headSha: blameRev ?? "",
+            }}
+            contentRef={contentRef}
+            shownPath={shownPath}
+            kind={view?.kind}
+            allFiles={scope.allFiles}
+            enabled={interactionEnabled && !composerOpen}
+            settled={
+              !diffSlots.holding &&
+              !diffSlots.read.loading &&
+              !diffSlots.read.placeholder
+            }
+            canExpandFull={fullFileReason === undefined}
+            onNavigate={navigateFile}
+            onExpandFull={() => setFileMode(true)}
+            onConsumed={onNavigationConsumed}
+          />
           <FileSlots
             slots={diffSlots}
             target={diffTarget}
@@ -1277,7 +1301,7 @@ function PrFileDiffSlot({
     () => (data && diffContext ? { ...data, text: diffContext.patch } : data),
     [data, diffContext],
   );
-  const content = (
+  const codeContent = (
     <div className="flex h-full min-h-0 flex-col">
       <NearbyCodeNotice resource={nearbyCode} />
       <div className="min-h-0 flex-1">
@@ -1299,6 +1323,25 @@ function PrFileDiffSlot({
         />
       </div>
     </div>
+  );
+  const pending = isPending || dataIsPlaceholder || data === undefined;
+  const nonCode =
+    pending ||
+    data?.isBinary ||
+    !data?.text.trim() ||
+    classifyHeaderOnlyDiff(data?.text ?? "") !== null;
+  const content = nonCode ? (
+    <PrFileContextMarker
+      className="h-full"
+      path={path}
+      headSha={anchorCommit}
+      oldPath={data ? sectionOldFilePath(data.text) : undefined}
+      pending={pending}
+    >
+      {codeContent}
+    </PrFileContextMarker>
+  ) : (
+    codeContent
   );
   return onOpenImport ? (
     <PrCodeImportLinks

@@ -357,7 +357,7 @@ export const capabilities: Capability[] = [
     group: "AI · agents & sessions",
     ai: true,
     label:
-      "Collapsible, resizable MR chat — choose a CLI, attach files or selected code, list this request's ongoing sessions, and recover missing Codex sessions from saved messages",
+      "Collapsible, resizable MR chat — choose a Harness and its permissions, query MR context through MCP, attach selected code, and open answer file links in the diff tree",
   },
   {
     group: "Pull requests & review",
@@ -601,7 +601,7 @@ export const capabilities: Capability[] = [
   {
     group: "Repository & workspace",
     label:
-      "My works discovers existing checkouts in known repository locations and reuses verified MR clone destinations",
+      "My works discovers existing checkouts in known repository locations, waits for checkout verification and reuses verified MR clone destinations",
   },
   {
     group: "Repository & workspace",

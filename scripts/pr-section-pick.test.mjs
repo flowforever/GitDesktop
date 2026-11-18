@@ -16,8 +16,8 @@ const read = (file) =>
 
 const VIEWS = {
   "src/features/pulls/RemotePrView.tsx": {
-    // The section buttons, the tasks chip, the feed's commit drill-in.
-    userCalls: 3,
+    // The section buttons, tasks chip, feed commit and chat file links.
+    userCalls: 4,
     // The activity feed's "View thread" route.
     userProps: 1,
   },
@@ -85,6 +85,17 @@ test("mutation control: a reverted section button fails the pin", () => {
   );
   assert.notEqual(reverted, source, "mutation target not found");
   assert.notDeepEqual(audit(reverted, VIEWS[file]), []);
+});
+
+test("mutation control: a chat file link with a silent section landing fails the pin", () => {
+  const file = "src/features/pulls/RemotePrView.tsx";
+  const source = read(file);
+  const silent = source.replace(
+    'onNavigate: () => pickSection("files"),',
+    'onNavigate: () => setSection("files"),',
+  );
+  assert.notEqual(silent, source, "mutation target not found");
+  assert.notDeepEqual(audit(silent, VIEWS[file]), []);
 });
 
 test("mutation control: a noting pending landing fails the pin", () => {

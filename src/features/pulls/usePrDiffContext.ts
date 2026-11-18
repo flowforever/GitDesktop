@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { usePanelActive } from "@/components/panel-portal";
 import { useDiffPaneHold } from "@/features/diff/diff-pane-hold";
+import type { DiffFileVersions } from "@/features/diff/file-versions";
 import { lineComposerOpen } from "@/features/diff/whitespace-mode";
 import { FULL_OID_RE } from "@/lib/git/oid";
 import { prSnapshotComparisonOptions } from "@/lib/git/queries/pr-snapshot";
@@ -22,7 +23,11 @@ type ContextTarget = {
 };
 
 type PrDiffContext = {
-  content: { old: string | null; new: string | null };
+  content: {
+    old: string | null;
+    new: string | null;
+    versions: DiffFileVersions;
+  };
   patch: string;
 };
 
@@ -101,8 +106,7 @@ export function usePrDiffContext({
     data.filePath === path &&
     !data.isBinary &&
     !data.isTruncated &&
-    /^@@ /m.test(data.text) &&
-    !/^(?:---|\+\+\+) \/dev\/null(?:\r?$|\t)/m.test(data.text);
+    /^@@ /m.test(data.text);
   const canRead = eligible && panelActive && phase !== "held" && !composerHeld;
   const read = useQuery({
     ...prSnapshotComparisonOptions(
@@ -123,16 +127,26 @@ export function usePrDiffContext({
       patch === undefined
     )
       return undefined;
-    if (read.data.oldPath === null || read.data.newPath === null)
-      return { kind: "unavailable", reason: "invalid" } as const;
     return buildPrSnapshotContext(read.data, path, headSha ?? "", patch);
   }, [eligible, read.data, read.isPlaceholderData, path, headSha, patch]);
   const context = useMemo(
     () =>
-      result?.kind === "ready"
-        ? { content: result.content, patch: result.patch }
+      result?.kind === "ready" && read.data
+        ? {
+            content: {
+              ...result.content,
+              versions: {
+                before: {
+                  path: read.data.oldPath,
+                  revision: read.data.baseSha,
+                },
+                after: { path: read.data.newPath, revision: read.data.headSha },
+              },
+            },
+            patch: result.patch,
+          }
         : undefined,
-    [result],
+    [result, read.data],
   );
   let state: PrDiffContextResource["state"] = "idle";
   if (eligible) {

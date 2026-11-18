@@ -469,16 +469,27 @@ in one click.
   MR's before-and-after versions. Other files stay unloaded.
   The active request prepares its selected file in the background; a loading
   notice keeps preparation visible while the partial diff remains available.
-- **Chat while reviewing**: the right sidebar offers CLI and model selection,
-  includes the current request's context, and can attach the viewed file or
-  selected diff/source code. Its session picker lists only ongoing chats for
-  this request and checkout, including chats awaiting your next message.
-  **New chat** starts a separate conversation. The read-only chat stays with
-  the request as you switch sections. Collapse it to a narrow strip or drag
+- **Chat while reviewing**: choose the Harness CLI in the sidebar header and
+  set its model and thinking effort beside the composer. **Permissions** offers
+  the selected CLI's modes, including Codex **Read-only**, **Auto** and
+  **Full Access**. Each chat remembers its choice; permission changes wait until
+  its response finishes. Requested edits apply to the current checkout.
+  A new CLI session receives the MR link. Each message includes the viewed
+  file's paths and exact versions, both before and after for diffs, without
+  repeating the MR description or loading its whole diff. GitDesktop's MCP query tools are mounted
+  for all four CLIs, bound to the checkout and selected remote, so the CLI can
+  read MR details, diffs and files on demand. Select diff code and choose
+  **Add to chat** to attach it while keeping your draft. File links in answers
+  open the request's diff or source and reveal the file in its tree.
+  The session picker lists only ongoing chats for this request and checkout,
+  including chats awaiting your next message.
+  Choose **New chat** in the session picker for a separate conversation. The chat
+  stays with the request as you switch sections. Collapse it to a narrow strip or drag
   its left boundary to adjust its width; drafts, attachments and running chats
   are retained. If Codex cannot find its saved session, the chat recovers from
-  recent saved messages and fresh MR context. Earlier code attachments and tool
-  output need to be supplied again. AI-excluded files stay out of context.
+  recent saved messages, the MR link and current file versions. Earlier code
+  attachments and tool output need to be supplied again. Automatic file context
+  and attachments honor AI exclusions.
 - **Follow imports while reviewing**: click an import, module or include path
   in a diff or source preview to open its file at the request's head and reveal
   it in the tree. Supports JavaScript/TypeScript, Python, Go, Rust, Java/Kotlin,

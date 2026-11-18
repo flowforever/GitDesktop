@@ -150,6 +150,30 @@ pub(super) async fn ensure_github_for(repo: &str, feature: &str) -> Result<(), M
 
 #[tool_router(router = read_forge_router, vis = "pub(crate)")]
 impl GitDesktopMcp {
+    async fn forge_read_lens(&self) -> Result<Option<String>, McpError> {
+        if self.remote.as_deref() == Some("upstream") {
+            if crate::forge::detect_non_github(&self.repo).await.is_some() {
+                return Err(McpError::invalid_request(
+                    "The upstream MCP read lens is supported for GitHub repositories only.",
+                    None,
+                ));
+            }
+            let origin = crate::git::remote::git_remote_url(self.repo.clone(), "origin".into())
+                .await
+                .map_err(app_err)?;
+            let upstream = crate::git::remote::git_remote_url(self.repo.clone(), "upstream".into())
+                .await
+                .map_err(app_err)?;
+            if crate::forge::remote_host(&origin) != crate::forge::remote_host(&upstream) {
+                return Err(McpError::invalid_request(
+                    "The upstream MCP remote must use the same GitHub host as origin.",
+                    None,
+                ));
+            }
+        }
+        Ok(self.remote.clone())
+    }
+
     #[tool(
         description = "List pull requests from the repository's forge (GitHub, GitLab, or \
                        Bitbucket, per its remote). `state` is \"open\" (default), \"closed\" \
@@ -186,10 +210,7 @@ impl GitDesktopMcp {
             self.repo.clone(),
             args.state.unwrap_or_else(|| "open".to_string()),
             args.limit,
-            // MCP stays origin-pinned in v1 (no lens surface): a fork's MCP server
-            // always answers for the fork itself. Documented gap, tracked for a later
-            // pass. Same for every `None` lens below.
-            None,
+            self.forge_read_lens().await?,
             // The MCP tool surface exposes no list filter; the list is unfiltered.
             None,
         )
@@ -228,7 +249,7 @@ impl GitDesktopMcp {
         &self,
         Parameters(args): Parameters<NumberArg>,
     ) -> Result<CallToolResult, McpError> {
-        let pr = crate::forge::forge_pr_view(self.repo.clone(), args.number, None)
+        let pr = crate::forge::forge_pr_view(self.repo.clone(), args.number, self.forge_read_lens().await?)
             .await
             .map_err(app_err)?;
         json_result_untrusted(&pr)
@@ -242,7 +263,7 @@ impl GitDesktopMcp {
         &self,
         Parameters(args): Parameters<NumberArg>,
     ) -> Result<CallToolResult, McpError> {
-        let diff = crate::forge::forge_pr_diff(self.repo.clone(), args.number, None)
+        let diff = crate::forge::forge_pr_diff(self.repo.clone(), args.number, self.forge_read_lens().await?)
             .await
             .map_err(app_err)?;
         text_result_untrusted(cap_head(diff, GH_TEXT_MAX_BYTES))
@@ -273,7 +294,7 @@ impl GitDesktopMcp {
         Parameters(args): Parameters<PrCommentsArgs>,
     ) -> Result<CallToolResult, McpError> {
         let conv = if crate::forge::detect_non_github(&self.repo).await.is_some() {
-            let pr = crate::forge::forge_pr_view(self.repo.clone(), args.number, None)
+            let pr = crate::forge::forge_pr_view(self.repo.clone(), args.number, self.forge_read_lens().await?)
                 .await
                 .map_err(app_err)?;
             crate::github::pr::PrConversation {
@@ -285,12 +306,12 @@ impl GitDesktopMcp {
             }
         } else {
             // None is the GitHub arm, matching forge_pr_view's dispatch.
-            crate::github::pr::gh_pr_comments_view(self.repo.clone(), args.number, None)
+            crate::github::pr::gh_pr_comments_view(self.repo.clone(), args.number, self.forge_read_lens().await?)
                 .await
                 .map_err(app_err)?
         };
         let mut review_threads =
-            crate::forge::forge_pr_review_threads(self.repo.clone(), args.number, None)
+            crate::forge::forge_pr_review_threads(self.repo.clone(), args.number, self.forge_read_lens().await?)
                 .await
                 .map_err(app_err)?;
         // Bound each thread's diffHunk so a comment on a new file can't drag the
@@ -333,7 +354,7 @@ impl GitDesktopMcp {
             self.repo.clone(),
             args.state.unwrap_or_else(|| "open".to_string()),
             args.limit,
-            None,
+            self.forge_read_lens().await?,
             None,
         )
         .await
@@ -352,7 +373,7 @@ impl GitDesktopMcp {
         &self,
         Parameters(args): Parameters<NumberArg>,
     ) -> Result<CallToolResult, McpError> {
-        let issue = crate::forge::forge_issue_view(self.repo.clone(), args.number, None)
+        let issue = crate::forge::forge_issue_view(self.repo.clone(), args.number, self.forge_read_lens().await?)
             .await
             .map_err(app_err)?;
         json_result_untrusted(&issue)
@@ -431,7 +452,7 @@ impl GitDesktopMcp {
                        these names when applying labels via edit_labels. Returns JSON."
     )]
     async fn list_labels(&self) -> Result<CallToolResult, McpError> {
-        let labels = crate::forge::forge_repo_labels(self.repo.clone(), None)
+        let labels = crate::forge::forge_repo_labels(self.repo.clone(), self.forge_read_lens().await?)
             .await
             .map_err(app_err)?;
         json_result(&labels)
@@ -442,7 +463,7 @@ impl GitDesktopMcp {
                        remote; Bitbucket milestones aren't supported). Returns JSON."
     )]
     async fn list_milestones(&self) -> Result<CallToolResult, McpError> {
-        let milestones = crate::forge::forge_milestones(self.repo.clone(), None)
+        let milestones = crate::forge::forge_milestones(self.repo.clone(), self.forge_read_lens().await?)
             .await
             .map_err(app_err)?;
         json_result_untrusted(&milestones)
@@ -483,7 +504,7 @@ impl GitDesktopMcp {
                        users says so in a second text block."
     )]
     async fn list_assignable_users(&self) -> Result<CallToolResult, McpError> {
-        let list = crate::forge::forge_assignable_users(self.repo.clone(), None)
+        let list = crate::forge::forge_assignable_users(self.repo.clone(), self.forge_read_lens().await?)
             .await
             .map_err(app_err)?;
         let blocks = assignable_users_blocks(&list)?;
@@ -501,7 +522,7 @@ impl GitDesktopMcp {
         &self,
         Parameters(args): Parameters<NumberArg>,
     ) -> Result<CallToolResult, McpError> {
-        let timeline = crate::forge::forge_pr_timeline(self.repo.clone(), args.number, None)
+        let timeline = crate::forge::forge_pr_timeline(self.repo.clone(), args.number, self.forge_read_lens().await?)
             .await
             .map_err(app_err)?;
         json_result_untrusted(&timeline)
@@ -672,6 +693,35 @@ fn assignable_users_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn bound_pr_reads_resolve_the_requested_remote_before_any_network_call() {
+        use crate::git::runner::{run_git, TEST_GIT_HANG_GUARD};
+        let dir = tempfile::Builder::new().prefix("gd-mcp-read-lens-").tempdir().unwrap();
+        let repo = dir.path().to_string_lossy().into_owned();
+        run_git(Some(&repo), &["init", "-q"], TEST_GIT_HANG_GUARD).await.unwrap();
+        for (remote, url) in [("origin", "https://github.com/origin-invalid"), ("upstream", "https://github.com/upstream-invalid")] {
+            run_git(Some(&repo), &["remote", "add", remote, url], TEST_GIT_HANG_GUARD).await.unwrap();
+        }
+        // Both deliberately invalid owner/repo paths fail before gh can start.
+        let handler = GitDesktopMcp::with_options(repo, false, false, false, false).with_read_remote(Some("upstream".into())).unwrap();
+        let results = [
+            ("view", handler.get_pull_request(Parameters(NumberArg { number: 7 })).await.map(|_| ())),
+            ("diff", handler.pull_request_diff(Parameters(NumberArg { number: 7 })).await.map(|_| ())),
+            ("comments", handler.list_pull_request_comments(Parameters(PrCommentsArgs { number: 7, include_diff_hunk: false })).await.map(|_| ())),
+            ("timeline", handler.get_pull_request_timeline(Parameters(NumberArg { number: 7 })).await.map(|_| ())),
+            ("list", handler.list_pull_requests(Parameters(PrListArgs { state: None, limit: Some(1) })).await.map(|_| ())),
+            ("issue", handler.get_issue(Parameters(NumberArg { number: 7 })).await.map(|_| ())),
+            ("labels", handler.list_labels().await.map(|_| ())),
+            ("milestones", handler.list_milestones().await.map(|_| ())),
+            ("assignees", handler.list_assignable_users().await.map(|_| ())),
+        ];
+        for (name, result) in results {
+            let message = result.expect_err(name).to_string();
+            assert!(message.contains("upstream"), "{name}: {message}");
+            assert!(!message.contains("origin-invalid"), "{name}: {message}");
+        }
+    }
 
     #[test]
     fn forge_user_list_mcp_blocks_keep_the_array_and_add_the_note_only_when_truncated() {

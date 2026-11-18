@@ -72,6 +72,8 @@ const GD_COMMENT_FOOTER: &str =
 #[derive(Clone)]
 pub struct GitDesktopMcp {
     repo: String,
+    /// Present only for the read-only, remote-bound MR chat server mode.
+    remote: Option<String>,
     /// The `--repo` spelling as the client CONFIGURED it, kept only when canonicalization
     /// changed it. Canonicalizing resolves junctions, symlinks, 8.3 names and case, so a
     /// session that ran before it did keyed its per-repo records under this spelling
@@ -230,6 +232,7 @@ impl GitDesktopMcp {
     ) -> Self {
         Self {
             repo,
+            remote: None,
             raw_repo: None,
             allow_write,
             allow_remote_write,
@@ -255,6 +258,38 @@ impl GitDesktopMcp {
             // contributes any, so there's no `+` chain here.
             prompt_router: Self::generate_prompt_router(),
         }
+    }
+
+    pub(crate) fn chat_tool_router() -> ToolRouter<Self> {
+        let mut forge = Self::read_forge_router();
+        // These APIs cannot select a remote; exposing them would answer for origin.
+        for name in [
+            "list_workflow_runs",
+            "get_workflow_run",
+            "workflow_failed_logs",
+            "workflow_job_logs",
+            "list_releases",
+            "get_release",
+            "list_discussion_categories",
+            "list_discussions",
+            "get_discussion",
+        ] {
+            forge.remove_route(name);
+        }
+        Self::read_git_router() + forge
+    }
+
+    fn with_read_remote(mut self, remote: Option<String>) -> crate::error::AppResult<Self> {
+        validate_read_remote(
+            remote.as_deref(),
+            self.allow_write || self.allow_remote_write || self.allow_git_write || self.allow_destructive,
+        )?;
+        if remote.is_some() {
+            self.tool_router = Self::chat_tool_router();
+            self.prompt_router = PromptRouter::new();
+        }
+        self.remote = remote;
+        Ok(self)
     }
 
     /// Carry the pre-canonicalization `--repo` spelling (see [`Self::raw_repo`]). Kept off
@@ -663,6 +698,7 @@ pub fn run_mcp_server() {
 }
 
 async fn serve(args: McpArgs) -> Result<(), Box<dyn std::error::Error>> {
+    args.validate()?;
     // A client started from Finder/Dock hands this process launchd's minimal PATH, and
     // main.rs reaches here without the app's startup capture. Fire-and-forget on this
     // runtime; the capture writes nothing to stdout, which carries the JSON-RPC stream.
@@ -679,6 +715,7 @@ async fn serve(args: McpArgs) -> Result<(), Box<dyn std::error::Error>> {
         args.allow_git_write,
         args.allow_destructive,
     )
+    .with_read_remote(args.remote)?
     .with_raw_repo(args.raw_repo)
     .serve(stdio())
     .await?;
@@ -698,6 +735,7 @@ fn mcp_should_prime(marker: Option<&std::ffi::OsStr>, path: Option<&std::ffi::Os
 /// forge, `--allow-git-write` → local git, `--allow-destructive` → destructive git).
 struct McpArgs {
     repo: String,
+    remote: Option<String>,
     /// The `--repo` spelling before canonicalization, kept ONLY when it differs — the
     /// legacy store key a session that predates canonicalization wrote under.
     raw_repo: Option<String>,
@@ -708,6 +746,13 @@ struct McpArgs {
 }
 
 impl McpArgs {
+    fn validate(&self) -> crate::error::AppResult<()> {
+        validate_read_remote(
+            self.remote.as_deref(),
+            self.allow_write || self.allow_remote_write || self.allow_git_write || self.allow_destructive,
+        )
+    }
+
     fn from_env() -> Self {
         Self::parse(std::env::args().skip(1))
     }
@@ -721,6 +766,7 @@ impl McpArgs {
     /// returned; parse itself stays infallible.
     fn parse(args: impl Iterator<Item = String>) -> Self {
         let mut repo: Option<String> = None;
+        let mut remote: Option<String> = None;
         let mut allow_write = false;
         let mut allow_remote_write = false;
         let mut allow_git_write = false;
@@ -733,6 +779,10 @@ impl McpArgs {
                 }
             } else if let Some(path) = arg.strip_prefix("--repo=") {
                 repo = Some(path.to_string());
+            } else if arg == "--remote" {
+                remote = Some(args.next().unwrap_or_default());
+            } else if let Some(value) = arg.strip_prefix("--remote=") {
+                remote = Some(value.to_string());
             } else if arg == "--allow-write" {
                 allow_write = true;
             } else if arg == "--allow-remote-write" {
@@ -759,6 +809,7 @@ impl McpArgs {
         let raw_repo = (canonical != repo).then_some(repo);
         Self {
             repo: canonical,
+            remote,
             raw_repo,
             allow_write,
             allow_remote_write,
@@ -766,6 +817,18 @@ impl McpArgs {
             allow_destructive,
         }
     }
+}
+
+fn validate_read_remote(remote: Option<&str>, writes: bool) -> crate::error::AppResult<()> {
+    if remote.is_some() {
+        crate::github::lens_remote(remote)?;
+        if writes {
+            return Err(AppError::InvalidArgument(
+                "--remote is a read-only MCP mode and cannot be combined with write opt-ins".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -843,6 +906,39 @@ mod tests {
         let args = parse(&["--repo", &repo]);
         assert_eq!(args.repo, repo);
         assert!(!args.allow_write);
+    }
+
+    #[test]
+    fn bound_read_remote_is_validated_and_cannot_be_combined_with_write_opt_ins() {
+        let (_fixture, repo) = repo_arg_fixture();
+        for remote in ["origin", "upstream"] {
+            let args = parse(&["--repo", &repo, "--remote", remote]);
+            args.validate().unwrap();
+            assert_eq!(args.remote.as_deref(), Some(remote));
+            assert_eq!(parse(&["--repo", &repo, &format!("--remote={remote}")]).remote.as_deref(), Some(remote));
+        }
+        for remote in ["", "bogus", "ORIGIN", "upstream "] {
+            assert!(parse(&["--repo", &repo, "--remote", remote]).validate().is_err());
+        }
+        assert!(parse(&["--repo", &repo, "--remote"]).validate().is_err());
+        for flag in ["--allow-write", "--allow-remote-write", "--allow-git-write", "--allow-destructive"] {
+            assert!(parse(&["--repo", &repo, "--remote", "origin", flag]).validate().is_err());
+            parse(&["--repo", &repo, flag]).validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn a_remote_bound_server_exposes_only_lens_aware_read_tools() {
+        let bound = handler(false, false, false, false).with_read_remote(Some("upstream".into())).unwrap();
+        let names: Vec<_> = bound.tool_router.list_all().into_iter().map(|tool| tool.name.to_string()).collect();
+        for name in ["read_file", "diff_refs", "get_pull_request", "pull_request_diff", "list_pull_request_comments", "get_pull_request_timeline"] {
+            assert!(names.iter().any(|tool| tool == name), "{name}: {names:?}");
+        }
+        for name in ["create_pull_request", "merge_pull_request", "list_workflow_runs", "list_releases", "list_projects", "list_discussions"] {
+            assert!(!names.iter().any(|tool| tool == name), "{name}: {names:?}");
+        }
+        assert!(handler(true, false, false, false).with_read_remote(Some("origin".into())).is_err());
+        assert!(handler(false, false, false, false).with_read_remote(Some("bogus".into())).is_err());
     }
 
     #[test]

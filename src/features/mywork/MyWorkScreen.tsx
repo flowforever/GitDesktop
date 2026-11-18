@@ -222,12 +222,8 @@ const NO_LEGS: MyWorkLeg[] = [];
 const NO_ERRORS: LegError[] = [];
 const NO_ITEMS: MyWorkItem[] = [];
 
-/** Total budget for resolving where to open a PR, spanning EVERY awaited leg of
- *  the resolution — the worktree list, the head-ref read, and the validate of
- *  whatever checkout they point at. Opening must stay a keypress-fast action,
- *  and any one leg can block for seconds (git's prune, a stalled network mount).
- *  Legs that consume the whole budget leave nothing for the ones after them,
- *  which fall back to the main checkout — the safe direction. */
+/** Budget for optional worktree preference after live checkout identity is
+ * proven. Expiry falls back to that proven checkout; it cannot prove absence. */
 const WORKTREE_RESOLVE_BUDGET_MS = 1500;
 
 /** Grace period before a resolving open lights its row, so a resolution that
@@ -340,29 +336,17 @@ function hasOpenableMatch(
 /**
  * The first candidate whose origin really is this item's repository, else null.
  * Both clones of an ambiguous key can be in recents, so a single failed proof
- * says nothing about the rest. Sequential and bounded: candidates number a
- * handful at most, and an expiry mid-loop simply stops proving — the caller
- * treats that like any other unproven match.
+ * says nothing about the rest. These required local reads retain their backend
+ * timeouts; a newer action retires proof between reads and between candidates.
  */
 async function provenCandidate(
   item: MyWorkItem,
   candidates: readonly RecentRepo[],
-  deadline: number,
   stillValid: () => boolean,
 ): Promise<RecentRepo | null> {
   for (const candidate of candidates) {
-    // A spent budget would race git against a zero-length timeout and discard
-    // the result — stop rather than spawn one per remaining candidate.
-    if (Date.now() >= deadline || !stillValid()) return null;
-    const info = await withDeadline(
-      proveWorkRepoCheckout(
-        item,
-        candidate.path,
-        () => Date.now() < deadline && stillValid(),
-      ),
-      deadline,
-      null,
-    );
+    if (!stillValid()) return null;
+    const info = await proveWorkRepoCheckout(item, candidate.path, stillValid);
     if (info) return { ...candidate, ...workRepoRecent(item, info) };
   }
   return null;
@@ -729,28 +713,22 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
     // projects. Elsewhere the key is identity, so several candidates are clones of
     // the one right repository and the proof only has to find a live one.
     let match = candidates[0];
-    // Recents rows outlive deleted and moved clones, so prove the path is still
-    // a repo before navigating; the browser fallback keeps the row a working
-    // link while the toast names the stale path (repair lives in the repo list).
-    try {
-      await validateRepo(match.path);
-    } catch (e) {
-      if (superseded()) return;
-      // A stale FIRST candidate is not the end of a multi-candidate row: the
-      // proof rejects a dead path anyway, so only a row with nowhere else to
-      // look reports it and gives up here.
-      if (candidates.length === 1) {
-        if (item.isPullRequest) setConnectItem(item);
-        else openUrl(item.url);
-        // Only a real notARepo earns the stale-path sentence — a missing CLI or
-        // an IPC failure would be misdescribed by it, so it takes the generic
-        // toast.
-        if (isAppError(e) && e.kind === "notARepo") {
-          toast.error(`${match.path} is no longer a git repository.`);
-        } else {
-          toastError(e);
+    // Issues keep their stale-path/browser feedback. MR proof below validates
+    // once, with its pending affordance already armed before the first read.
+    if (!item.isPullRequest) {
+      try {
+        await validateRepo(match.path);
+      } catch (e) {
+        if (superseded()) return;
+        if (candidates.length === 1) {
+          openUrl(item.url);
+          if (isAppError(e) && e.kind === "notARepo") {
+            toast.error(`${match.path} is no longer a git repository.`);
+          } else {
+            toastError(e);
+          }
+          return;
         }
-        return;
       }
     }
     if (superseded()) return;
@@ -775,17 +753,12 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
       // own the affordance from its first instant, or the superseded open's
       // cleanup darkens a row the successor is still resolving.
       pendingGenRef.current = gen;
-      // One budget for the whole resolution, however many legs it takes.
-      const deadline = Date.now() + WORKTREE_RESOLVE_BUDGET_MS;
       try {
-        // Settle which candidate is really this row's first in the budget —
-        // ahead of the optional worktree legs, which may spend the rest of it.
-        // None proven opens the browser: the row stays a working link, and no
-        // open lands in a checkout that isn't this project's.
+        // Correctness precedes the optional worktree budget: a slow valid origin
+        // must not be reported as a missing checkout.
         const proven = await provenCandidate(
           item,
           candidates,
-          deadline,
           () => !superseded(),
         );
         if (superseded()) return;
@@ -801,6 +774,8 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
         targetName = proven.name;
         if (
           item.isPullRequest &&
+          (!opts?.connectedRepo ||
+            normPath(opts.connectedRepo.path) !== normPath(proven.path)) &&
           !recents.some(
             (recent) =>
               recent.path === proven.path &&
@@ -813,6 +788,7 @@ export function MyWorkScreen({ active = true }: { active?: boolean }) {
           await addRecent.mutateAsync(proven);
           if (superseded()) return;
         }
+        const deadline = Date.now() + WORKTREE_RESOLVE_BUDGET_MS;
         // Listed once and shared: both preferences read the same snapshot, and
         // this is the leg that can block.
         const worktrees = await withDeadline(

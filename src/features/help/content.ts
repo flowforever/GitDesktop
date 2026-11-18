@@ -1644,28 +1644,47 @@ toolbar with the view toggle. Its up/down arrows jump between change blocks in
 the file, including in Full file view. File and change navigation are also
 available from the command palette.
 
-{{ai}}The right-hand **MR chat** sidebar stays available across Conversation, Files and
-Review. Choose a CLI and model, then ask a question; the request's title,
-description, branches and changes accompany each message. Its session picker
+{{ai}}The right-hand chat sidebar stays available across Conversation, Files and
+Review. Choose the **Harness CLI** in its header, then choose a model and thinking
+effort beside the composer. A new CLI session receives the **MR link**. Every
+message carries the viewed file's paths and exact commits: **Before** and **After**
+for diffs, or the head version for a source preview. File contents are read on demand.
+MR descriptions and whole diffs are not repeated
+with each message. GitDesktop's MCP tools are mounted for Claude, Codex, Copilot
+and OpenCode to query the bound checkout and selected remote.
+
+Its session picker
 shows only ongoing chats for this exact request and checkout, including chats
-waiting for your next message. **New chat** starts a separate conversation.
+waiting for your next message. Choose **New chat** in that picker for a separate conversation.
+The **Permissions** dropdown offers the selected CLI's permission modes. Codex
+offers **Read-only**, **Auto** (writes within the checkout), and **Full Access**.
+Claude offers **Plan**, **Default**, **Accept edits**, **Auto**, and **Bypass
+permissions**; Copilot offers **Read-only**, **Allow tools**, and **Full Access**;
+OpenCode offers **Plan**, **Default**, and **Auto**. Each conversation remembers its
+choice, which stays fixed until its response has fully finished. Requested edits
+apply to the current checkout; they do not automatically check out the MR branch
+or create a commit. The mounted MCP tools provide queries in every permission mode.
+
 Use **Collapse MR chat** to reclaim code space, then **Expand MR chat** to bring
 it back. Drag the chat's left boundary to resize it, or focus that separator and
 use the arrow keys. Your width, draft, attachments and running conversation are
 preserved when you collapse or expand the pane.
 
 If Codex can no longer find its local session, MR chat restores recent saved
-messages and refreshes the request context in a new CLI session. Older history
+messages, the MR link and current file versions in a new CLI session. Older history
 may be truncated; previous code attachments and tool output are not restored.
 Attach any code you still need before continuing.
 
-Use **Attach current file** for the version you are viewing, or select code in a
-rendered diff or ordinary source view and choose **Attach selected code**. Attachment
+Select code in a rendered diff or source view and click **Add to chat** beside the
+selection. It opens a collapsed chat and adds the snippet without replacing your
+draft. **Attach current file** adds file contents explicitly; **Attach selected code**
+in the composer is also available. Attachment
 chips can be previewed and removed before sending. Large-source CodeMirror views
 support file attachments; their editor selections are not attached. Files and
-selections are tied to the request's commit snapshots, and AI-excluded files stay
-out of context. Chat uses a read-only CLI session and keeps running when you
-switch to another request.{{/ai}}
+selections are tied to the request's commit snapshots; automatic file context and
+attachments honor AI exclusions. Click a file link in an answer to open its diff
+or source and reveal it in the file tree. Links with line numbers also locate the
+referenced code. Chat keeps running when you switch to another request.{{/ai}}
 
 Click an **import, module or include path** in Diff, Full file or source preview
 to open its target at the request's head commit and reveal it in the tree.

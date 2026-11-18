@@ -399,6 +399,7 @@ export function AgentTranscript({
   fileLinks = true,
   editDiffBase,
   editDiffLive = false,
+  onOpenFile,
 }: {
   segments: TranscriptSegment[];
   /** Repo/worktree root, used to show file targets + links as relative paths. */
@@ -411,6 +412,7 @@ export function AgentTranscript({
   editDiffBase?: string;
   /** The session is still running, so an open edit diff polls to stay fresh. */
   editDiffLive?: boolean;
+  onOpenFile?: (reference: string) => void;
 }) {
   if (segments.length === 0) return null;
   return (
@@ -419,7 +421,12 @@ export function AgentTranscript({
         if (seg.type === "text") {
           // Segments are append-only within a turn, so the index is a stable key.
           return fileLinks ? (
-            <AgentNarration key={i} text={seg.text} baseDir={baseDir ?? ""} />
+            <AgentNarration
+              key={i}
+              text={seg.text}
+              baseDir={baseDir ?? ""}
+              onOpenFile={onOpenFile}
+            />
           ) : (
             <Markdown key={i}>{seg.text}</Markdown>
           );

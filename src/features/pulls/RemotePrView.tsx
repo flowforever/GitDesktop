@@ -152,7 +152,9 @@ import { displayLogin } from "@/lib/git/bot-login";
 import { checkedOutNames } from "@/lib/git/checkout-route";
 import {
   binaryRowPaths,
+  classifyHeaderOnlyDiff,
   sectionIsBinary,
+  sectionOldFilePath,
   splitUnifiedDiff,
 } from "@/lib/git/diff-split";
 import { useForgeGhHost } from "@/lib/git/host";
@@ -296,6 +298,11 @@ import { LinkedIssuesField } from "./LinkedIssuesField";
 import { mergeStripArm } from "./merge-strip-arm";
 import { parseMrChatIdentity } from "./mr-chat/context";
 import { MrChatPane } from "./mr-chat/MrChatPane";
+import {
+  MrChatSelectionAction,
+  useMrChatSelectionQueue,
+} from "./mr-chat/MrChatSelectionAction";
+import { useMrChatFileNavigation } from "./mr-chat/useMrChatFileNavigation";
 import { PendingReviewBar } from "./PendingReviewBar";
 import { PendingReviewStrip } from "./PendingReviewStrip";
 import { PrActivityFeed, usePrThreadClaims } from "./PrActivityFeed";
@@ -2996,6 +3003,42 @@ export function RemotePrView({
       ? prHeadSha(pr)
       : undefined);
   const chatIdentity = pr ? parseMrChatIdentity(pr.url, shownNumber) : null;
+  const chatInteractive =
+    aiEnabled &&
+    isSelectedPr &&
+    !detailsStale &&
+    hold.interactive &&
+    !diffStale;
+  const chatScope = chatIdentity
+    ? { mr: chatIdentity, repoPath, headSha: fileHeadSha }
+    : null;
+  const chatSelection = useMrChatSelectionQueue(chatScope, chatInteractive);
+  const chatChangedFiles = useMemo(
+    () =>
+      (pr?.files ?? []).map((file) => {
+        const patch = fileSections.get(file.path) ?? "";
+        const header = classifyHeaderOnlyDiff(patch);
+        return {
+          path: file.path,
+          oldPath: sectionOldFilePath(patch) ?? header?.oldPath,
+          deleted:
+            header?.kind === "deleted-empty" ||
+            /^deleted file mode /m.test(patch) ||
+            /^\+\+\+ \/dev\/null(?:\r?$|\t)/m.test(patch),
+        };
+      }),
+    [pr?.files, fileSections],
+  );
+  const chatFiles = useMrChatFileNavigation({
+    mr: chatIdentity,
+    repoPath,
+    number: shownNumber,
+    lens,
+    headSha: fileHeadSha,
+    enabled: chatInteractive,
+    changedFiles: chatChangedFiles,
+    onNavigate: () => pickSection("files"),
+  });
   const fileHistory = usePrFileHistory(
     JSON.stringify([repoPath, lens, shownNumber, fileHeadSha ?? null]),
     selectedPath ?? effectivePath,
@@ -3310,9 +3353,15 @@ export function RemotePrView({
       <HeldFrame holding={hold.holding} className="flex h-full min-h-0">
         <div
           ref={chatCodeHostRef}
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         >
           {content}
+          <MrChatSelectionAction
+            hostRef={chatCodeHostRef}
+            context={chatScope}
+            enabled={chatInteractive}
+            onRequest={chatSelection.enqueue}
+          />
         </div>
         {sidebar}
       </HeldFrame>
@@ -5486,6 +5535,8 @@ export function RemotePrView({
               effectivePath={effectivePath}
               onSelectPath={pickPath}
               fileHistory={fileHistory}
+              navigationRequest={chatFiles.request}
+              onNavigationConsumed={chatFiles.consume}
               fileDiff={fileDiff}
               isPending={prDiff.isPending}
               isError={prDiff.isError}
@@ -5732,27 +5783,15 @@ export function RemotePrView({
                 headRefName: pr.headRefName,
                 headSha: fileHeadSha,
                 files: pr.files,
-                loadDiff: () =>
-                  import("./mr-chat/load-diff").then(({ loadMrChatDiff }) =>
-                    loadMrChatDiff(
-                      queryClient,
-                      {
-                        mr: chatIdentity,
-                        repoPath,
-                        headSha: fileHeadSha,
-                        baseRefName: pr.baseRefName,
-                        headRefName: pr.headRefName,
-                      },
-                      lens,
-                    ),
-                  ),
+                lens,
               }}
               lens={lens}
               codeHostRef={chatCodeHostRef}
               onCollapse={onCollapse}
-              enabled={
-                isSelectedPr && !detailsStale && hold.interactive && !diffStale
-              }
+              selectionRequest={chatSelection.request}
+              onSelectionConsumed={chatSelection.consume}
+              onOpenFile={chatFiles.onOpenFile}
+              enabled={chatInteractive}
             />
           </Suspense>
         )}

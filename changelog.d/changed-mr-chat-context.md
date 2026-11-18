@@ -1,0 +1,1 @@
+- Send the MR link when a CLI conversation starts and the viewed file's exact before-and-after versions with each message. Mount GitDesktop's MCP query tools for on-demand MR, diff and file reads instead of repeating whole MR context.

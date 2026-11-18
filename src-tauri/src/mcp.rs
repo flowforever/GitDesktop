@@ -7,8 +7,8 @@
 //!
 //! Each host takes a different shape and delivery: Claude `--mcp-config`, Copilot
 //! `--additional-mcp-config @file`, opencode the `OPENCODE_CONFIG` env var. **Codex**
-//! is container-only (`build_codex_config`) — host `codex exec` declines every MCP
-//! tool call.
+//! third-party servers use a container (`build_codex_config`); host sessions can
+//! explicitly mount our read-only server with invocation-scoped approvals.
 
 use std::path::{Path, PathBuf};
 
@@ -70,6 +70,40 @@ pub fn self_server_spec(repo_path: &str) -> AppResult<McpServerSpec> {
         headers: vec![],
         secret_keys: vec![],
     })
+}
+
+/// MR chats bind forge reads to the same remote lens as the visible request.
+/// The server's `--remote` mode rejects write opt-ins and hides unbound tools.
+pub fn chat_self_server_spec(repo_path: &str, remote: Option<&str>) -> AppResult<McpServerSpec> {
+    let remote = crate::github::lens_remote(remote)?;
+    let mut spec = self_server_spec(repo_path)?;
+    spec.args.extend(["--remote".into(), remote.into()]);
+    Ok(spec)
+}
+
+/// Invocation-only Codex policy for our generated read-only server. Other servers'
+/// existing configuration and approval policies remain unchanged.
+pub fn codex_self_config(repo_path: &str, remote: Option<&str>) -> AppResult<String> {
+    let spec = chat_self_server_spec(repo_path, remote)?;
+    let args: Vec<String> = spec.args.iter().map(|arg| toml_basic_string(arg)).collect();
+    let mut tools: Vec<String> = crate::mcp_server::GitDesktopMcp::chat_tool_router()
+        .list_all()
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect();
+    tools.sort();
+    let enabled: Vec<String> = tools.iter().map(|tool| toml_basic_string(tool)).collect();
+    let approvals: Vec<String> = tools
+        .iter()
+        .map(|tool| format!("{}={{approval_mode=\"approve\"}}", toml_key(tool)))
+        .collect();
+    Ok(format!(
+        "mcp_servers.gitdesktop={{command={},args=[{}],enabled_tools=[{}],disabled_tools=[],default_tools_approval_mode=\"approve\",tools={{{}}},enabled=true,required=true}}",
+        toml_basic_string(&spec.command),
+        args.join(","),
+        enabled.join(","),
+        approvals.join(",")
+    ))
 }
 
 impl McpServerSpec {
@@ -414,8 +448,8 @@ pub fn cleanup_host_config(app: &tauri::AppHandle, session_id: &str) {
 // Codex reads MCP servers from `~/.codex/config.toml`, NOT a `--mcp-config` flag. A
 // container session's `~/.codex` is a per-session mounted home seeded with only the
 // user's `auth.json`, so writing our `config.toml` there makes the opted-in servers
-// the ONLY MCP source and keeps secrets out of argv. Host Codex is unsupported on
-// purpose: `codex exec` cancels every MCP tool call (stdin EOF → "declined").
+// the ONLY MCP source and keeps secrets out of argv. Host sessions accept only our
+// built-in read-only server through `codex_self_config`; third-party specs stay gated.
 // The container arm passes `--dangerously-bypass-approvals-and-sandbox`, so its
 // tool calls run.
 
@@ -1096,6 +1130,51 @@ mod tests {
     }
 
     // --- mcp_json_write ------------------------------------------------------
+
+    #[test]
+    fn chat_self_server_spec_binds_a_validated_remote_without_write_flags() {
+        for remote in [None, Some("origin"), Some("upstream")] {
+            let spec = chat_self_server_spec(r"C:\repos\app", remote).unwrap();
+            assert_eq!(spec.command, self_server_spec("/other").unwrap().command);
+            assert_eq!(spec.name, "gitdesktop");
+            assert_eq!(
+                spec.args,
+                vec!["mcp", "--repo", r"C:\repos\app", "--remote", remote.unwrap_or("origin")]
+            );
+            assert!(spec.env.is_empty());
+            assert!(spec.headers.is_empty());
+            assert!(spec.secret_keys.is_empty());
+        }
+        for remote in ["", "fork", "--allow-write", "upstream "] {
+            assert!(chat_self_server_spec("/repo", Some(remote)).is_err());
+        }
+        assert_eq!(self_server_spec("/repo").unwrap().args, ["mcp", "--repo", "/repo"]);
+    }
+
+    #[test]
+    fn codex_self_config_approves_only_the_bound_read_tool_catalog() {
+        let config = codex_self_config("/repo with spaces", Some("upstream")).unwrap();
+        assert!(config.starts_with("mcp_servers.gitdesktop="), "{config}");
+        assert!(config.contains("default_tools_approval_mode=\"approve\""));
+        assert!(config.contains("enabled_tools=["));
+        for tool in ["read_file", "diff_refs", "get_pull_request", "pull_request_diff", "list_pull_request_comments"] {
+            assert!(config.contains(&toml_basic_string(tool)), "{tool}: {config}");
+        }
+        for tool in ["edit_file", "create_pull_request", "merge_pull_request", "git_push", "list_workflow_runs"] {
+            assert!(!config.contains(&toml_basic_string(tool)), "{tool}: {config}");
+        }
+        assert!(config.contains("\"--remote\",\"upstream\""));
+        assert!(!config.contains("--allow-"));
+        assert!(!config.contains("dangerously"));
+    }
+
+    #[test]
+    fn codex_self_config_quotes_repo_paths_as_data() {
+        let repo = "C:\\repo\\quoted\"\nwith controls";
+        let config = codex_self_config(repo, None).unwrap();
+        assert!(config.contains(&toml_basic_string(repo)), "{config}");
+        assert_eq!(config.lines().count(), 1);
+    }
 
     fn tmp_dir() -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::Builder::new()

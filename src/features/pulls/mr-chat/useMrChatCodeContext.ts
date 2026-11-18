@@ -2,6 +2,8 @@ import { type RefObject, useEffect, useRef, useState } from "react";
 import { FULL_OID_RE } from "@/lib/git/oid";
 import {
   type MrChatAttachment,
+  type MrChatFileContext,
+  type MrChatFileVersion,
   paintedMrFile,
   readMrCodeSelection,
 } from "./context";
@@ -10,7 +12,28 @@ export interface PaintedMrFile {
   path: string;
   lookupPath: string;
   side: "old" | "new";
+  view: "diff" | "source";
   headSha: string;
+  metadata: MrChatFileContext;
+  relatedPaths: string[];
+}
+
+function versionOf(
+  marker: HTMLElement,
+  side: "before" | "after",
+): MrChatFileVersion | null {
+  const revision = marker.getAttribute(`data-diff-${side}-revision`);
+  const path = marker.getAttribute(`data-diff-${side}-path`);
+  return revision && FULL_OID_RE.test(revision) && path !== null
+    ? { path: path === "" ? null : path, revision }
+    : null;
+}
+
+function sameVersion(
+  left: MrChatFileVersion | null | undefined,
+  right: MrChatFileVersion | null | undefined,
+) {
+  return left?.path === right?.path && left?.revision === right?.revision;
 }
 
 function readFile(
@@ -22,6 +45,7 @@ function readFile(
   const paintedHead = marker?.dataset.diffHeadSha ?? headSha;
   if (
     !marker ||
+    marker.dataset.diffContextPending === "true" ||
     !paintedHead ||
     !FULL_OID_RE.test(paintedHead) ||
     paintedHead.toLowerCase() !== headSha?.toLowerCase()
@@ -33,9 +57,29 @@ function readFile(
     side === "old"
       ? (marker.dataset.diffOldFilePath ?? lookupPath)
       : lookupPath;
-  return path && lookupPath
-    ? { path, lookupPath, side, headSha: paintedHead }
-    : null;
+  if (!path || !lookupPath) return null;
+  const before = versionOf(marker, "before");
+  const after = versionOf(marker, "after");
+  return {
+    path,
+    lookupPath,
+    side,
+    view: marker.hasAttribute("data-diff-content-side") ? "source" : "diff",
+    headSha: paintedHead,
+    metadata: { path: lookupPath, before, after },
+    relatedPaths: [
+      ...new Set(
+        [
+          lookupPath,
+          marker.dataset.diffOldFilePath,
+          before?.path,
+          after?.path,
+        ].filter(
+          (path): path is string => typeof path === "string" && path.length > 0,
+        ),
+      ),
+    ],
+  };
 }
 
 export function useMrChatCodeContext(
@@ -56,7 +100,11 @@ export function useMrChatCodeContext(
         previous?.path === next?.path &&
         previous?.lookupPath === next?.lookupPath &&
         previous?.side === next?.side &&
-        previous?.headSha === next?.headSha
+        previous?.view === next?.view &&
+        previous?.headSha === next?.headSha &&
+        previous?.relatedPaths.join("\0") === next?.relatedPaths.join("\0") &&
+        sameVersion(previous?.metadata.before, next?.metadata.before) &&
+        sameVersion(previous?.metadata.after, next?.metadata.after)
           ? previous
           : next,
       );
@@ -66,6 +114,7 @@ export function useMrChatCodeContext(
       if (
         selected &&
         (!selectedMarker ||
+          selectedMarker.dataset.diffContextPending === "true" ||
           selectedMarker.dataset.diffHeadSha !== selected.headSha ||
           selectedMarker.dataset.diffFilePath !== selected.lookupPath)
       ) {
@@ -110,6 +159,11 @@ export function useMrChatCodeContext(
         "data-diff-old-file-path",
         "data-diff-head-sha",
         "data-diff-content-side",
+        "data-diff-context-pending",
+        "data-diff-before-path",
+        "data-diff-before-revision",
+        "data-diff-after-path",
+        "data-diff-after-revision",
         "inert",
         "hidden",
         "aria-hidden",
@@ -142,5 +196,7 @@ export function useMrChatCodeContext(
       enabled && hostRef.current
         ? readFile(hostRef.current, headSha, activePath.current)
         : null,
+    hasPaintedFile: () =>
+      Boolean(hostRef.current?.querySelector("[data-diff-file-path]")),
   };
 }

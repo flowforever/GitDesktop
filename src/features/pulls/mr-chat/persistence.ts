@@ -1,5 +1,10 @@
 import type { SessionTurn } from "@/features/sessions/store";
 import { isAgentKind, type TranscriptSegment } from "@/lib/ai/agent";
+import {
+  agentPermissionReadOnly,
+  defaultAgentPermission,
+  isAgentPermissionMode,
+} from "@/lib/ai/agent-permissions";
 import { withAppStoreLock } from "@/lib/app-store-lock";
 import {
   memoizedStoreLoader,
@@ -101,6 +106,22 @@ function sessionOf(value: unknown, interrupted: boolean): MrChatSession | null {
   const turns = value.turns
     .map((turn) => turnOf(turn, interrupted))
     .filter((turn): turn is SessionTurn => turn !== null);
+  const claudeSessionId =
+    typeof value.claudeSessionId === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value.claudeSessionId,
+    )
+      ? value.claudeSessionId
+      : undefined;
+  const legacyReadOnly = Object.hasOwn(value, "readOnly")
+    ? value.readOnly !== false
+    : false;
+  const permissionMode = Object.hasOwn(value, "permissionMode")
+    ? isAgentPermissionMode(value.agent, value.permissionMode) &&
+      (!legacyReadOnly || agentPermissionReadOnly(value.permissionMode))
+      ? value.permissionMode
+      : defaultAgentPermission(value.agent, true)
+    : defaultAgentPermission(value.agent, legacyReadOnly);
   return {
     id: value.id,
     repoPath: value.repoPath,
@@ -112,8 +133,16 @@ function sessionOf(value: unknown, interrupted: boolean): MrChatSession | null {
     agent: value.agent,
     model: typeof value.model === "string" ? value.model : "",
     effort: typeof value.effort === "string" ? value.effort : "",
+    readOnly: agentPermissionReadOnly(permissionMode),
+    permissionMode,
     nativeSessionId:
       typeof value.nativeSessionId === "string" ? value.nativeSessionId : null,
+    ...(claudeSessionId
+      ? {
+          claudeSessionId,
+          claudeSessionReady: value.claudeSessionReady === true,
+        }
+      : {}),
     running: !interrupted && value.running === true,
     state: value.state,
     turns,

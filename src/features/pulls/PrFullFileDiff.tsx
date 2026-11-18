@@ -20,6 +20,10 @@ import { FULL_OID_RE } from "@/lib/git/oid";
 import { prSnapshotComparisonOptions } from "@/lib/git/queries/pr-snapshot";
 import type { RemoteLens } from "@/lib/git/types";
 import { PrCodeImportLinks } from "./PrCodeImportLinks";
+import {
+  PrFileContextMarker,
+  prComparisonVersions,
+} from "./PrFileContextMarker";
 import { PrFullFileLoading } from "./PrFullFileLoading";
 import {
   buildPrSnapshotContext,
@@ -87,6 +91,19 @@ export function PrFullFileDiff({
         : buildPrSnapshotContext(read.data, path, headSha),
     [read.data, path, headSha],
   );
+  const fileContent = useMemo(
+    () =>
+      result?.kind === "ready" && read.data
+        ? {
+            ...result.content,
+            versions: {
+              before: { path: read.data.oldPath, revision: read.data.baseSha },
+              after: { path: read.data.newPath, revision: read.data.headSha },
+            },
+          }
+        : undefined,
+    [result, read.data],
+  );
   const pane = resolveDetailPane({
     pending: read.isPending,
     error: read.isError,
@@ -116,6 +133,7 @@ export function PrFullFileDiff({
     </Button>
   );
   const ready = enabled && result?.kind === "ready";
+  const versions = prComparisonVersions(read.data, path, headSha);
   let body;
   if (!enabled)
     body = (
@@ -158,7 +176,7 @@ export function PrFullFileDiff({
         repoPath={repoPath}
         anchorCommit={headSha}
         fullContext
-        fileContent={result.content}
+        fileContent={fileContent}
       />
     );
     if (onOpenImport)
@@ -220,7 +238,22 @@ export function PrFullFileDiff({
         onRetry={failed ? retry : undefined}
         className="border-b px-3 py-1.5"
       />
-      <div className="min-h-0 flex-1">{body}</div>
+      {ready ? (
+        <div className="min-h-0 flex-1">{body}</div>
+      ) : (
+        <PrFileContextMarker
+          className="min-h-0 flex-1"
+          path={path}
+          headSha={headSha}
+          oldPath={read.data?.oldPath ?? undefined}
+          versions={versions}
+          pending={
+            !enabled || read.isPending || read.isPlaceholderData || !versions
+          }
+        >
+          {body}
+        </PrFileContextMarker>
+      )}
     </section>
   );
 }

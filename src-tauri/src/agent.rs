@@ -1961,6 +1961,164 @@ fn codex_session_args(
     args
 }
 
+fn codex_session_mcp_args(
+    mut args: Vec<String>,
+    enabled: bool,
+    repo_path: &str,
+    remote: Option<&str>,
+) -> AppResult<Vec<String>> {
+    if enabled {
+        args.splice(
+            1..1,
+            ["-c".into(), crate::mcp::codex_self_config(repo_path, remote)?],
+        );
+    }
+    Ok(args)
+}
+
+fn session_mcp_specs(
+    kind: AgentKind,
+    container: bool,
+    repo_path: &str,
+    mcp_self: bool,
+    remote: Option<&str>,
+    mut specs: Vec<crate::mcp::McpServerSpec>,
+) -> AppResult<Vec<crate::mcp::McpServerSpec>> {
+    crate::github::lens_remote(remote)?;
+    if mcp_self && container {
+        return Err(AppError::InvalidArgument(
+            "GitDesktop's built-in MCP server is available for host sessions only.".into(),
+        ));
+    }
+    if kind == AgentKind::Codex && !container && !specs.is_empty() {
+        return Err(AppError::Command(
+            "Codex runs third-party MCP servers in container sessions only. Use container isolation for opted-in servers.".into(),
+        ));
+    }
+    if mcp_self {
+        if specs
+            .iter()
+            .any(|spec| spec.id == "gitdesktop" || spec.name == "gitdesktop")
+        {
+            return Err(AppError::InvalidArgument(
+                "The gitdesktop MCP server name is reserved for the built-in server.".into(),
+            ));
+        }
+        specs.push(crate::mcp::chat_self_server_spec(repo_path, remote)?);
+    }
+    Ok(specs)
+}
+
+fn validate_session_permission_mode(
+    kind: AgentKind,
+    mode: Option<&str>,
+    read_only: bool,
+) -> AppResult<()> {
+    let Some(mode) = mode else {
+        return Ok(());
+    };
+    let valid = match kind {
+        AgentKind::Codex => matches!(mode, "read-only" | "auto" | "full-access"),
+        AgentKind::Claude => matches!(
+            mode,
+            "plan" | "default" | "auto" | "acceptEdits" | "bypassPermissions"
+        ),
+        AgentKind::Copilot => matches!(mode, "read-only" | "allow-tools" | "full-access"),
+        AgentKind::Opencode => matches!(mode, "plan" | "default" | "auto"),
+    };
+    if !valid {
+        return Err(AppError::InvalidArgument(format!(
+            "invalid permission mode {mode:?} for {}",
+            kind.label()
+        )));
+    }
+    let expected_read_only = matches!(mode, "read-only" | "plan");
+    if read_only != expected_read_only {
+        return Err(AppError::InvalidArgument(format!(
+            "permission mode {mode:?} requires readOnly={expected_read_only}"
+        )));
+    }
+    Ok(())
+}
+
+fn remove_session_option(args: &mut Vec<String>, flag: &str) {
+    while let Some(at) = args.iter().position(|arg| arg == flag) {
+        args.remove(at);
+        if at < args.len() {
+            args.remove(at);
+        }
+    }
+}
+
+/// Apply explicit profiles after building the normal invocation. Omitted profiles
+/// preserve existing Session/Plan/Research behavior, including container defaults.
+fn session_permission_args(
+    kind: AgentKind,
+    mut args: Vec<String>,
+    mode: Option<&str>,
+    read_only: bool,
+) -> AppResult<Vec<String>> {
+    validate_session_permission_mode(kind, mode, read_only)?;
+    let Some(mode) = mode else {
+        return Ok(args);
+    };
+    match kind {
+        AgentKind::Codex => {
+            remove_session_option(&mut args, "-s");
+            remove_session_option(&mut args, "--sandbox");
+            args.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox");
+            let mut at = 0;
+            while at + 1 < args.len() {
+                if args[at] == "-c"
+                    && (args[at + 1].starts_with("sandbox_workspace_write.network_access=")
+                        || (mode == "full-access"
+                            && args[at + 1].starts_with("windows.sandbox=")))
+                {
+                    args.drain(at..at + 2);
+                } else {
+                    at += 1;
+                }
+            }
+            let sandbox = match mode {
+                "read-only" => "read-only",
+                "auto" => "workspace-write",
+                _ => "danger-full-access",
+            };
+            let mut policy = vec!["-s".into(), sandbox.into()];
+            if mode == "auto" {
+                policy.extend([
+                    "-c".into(),
+                    "sandbox_workspace_write.network_access=true".into(),
+                ]);
+            }
+            // `resume` does not accept `-s`: every profile stays in exec's scope.
+            args.splice(1..1, policy);
+        }
+        AgentKind::Claude => {
+            remove_session_option(&mut args, "--permission-mode");
+            if mode != "default" {
+                args.extend(["--permission-mode".into(), mode.into()]);
+            }
+        }
+        AgentKind::Copilot => {
+            args.retain(|arg| arg != "--allow-all-paths");
+            if mode == "full-access" {
+                args.push("--allow-all-paths".into());
+            }
+        }
+        AgentKind::Opencode => {
+            args.retain(|arg| arg != "--dangerously-skip-permissions" && arg != "--auto");
+            if mode == "auto" {
+                args.push("--auto".into());
+            } else if mode == "plan" {
+                remove_session_option(&mut args, "--agent");
+                args.extend(["--agent".into(), "plan".into()]);
+            }
+        }
+    }
+    Ok(args)
+}
+
 /// The session's worktree as the CLI will see it FOR THIS RUN: `/workspace` in a
 /// container (the bind-mount target — the host path names nothing inside), the real
 /// host path otherwise.
@@ -4470,7 +4628,8 @@ pub async fn agent_review_cancel(
 ///
 /// `agent` picks the CLI; each runs worktree-confined on the **host** (see its
 /// `*_session_args` doc for the mechanism) or in a **container** (kernel
-/// boundary — and for Codex the only mode where MCP works). Copilot's container
+/// boundary). Third-party Codex MCP servers require a container; the read-only
+/// built-in server also works on the host. Copilot's container
 /// authenticates from a `gh auth token` passed by env.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -4500,6 +4659,9 @@ pub async fn agent_session(
     // can explore but never write, even in the live repo (for opencode, unless the
     // repo's own opencode config re-enables a tool; see `opencode_session_env`).
     read_only: bool,
+    // An explicit mode must match both the selected CLI and the read-only profile.
+    // None leaves existing callers' native permission behavior unchanged.
+    permission_mode: Option<String>,
     // Research profile: each CLI gains its native web tools while still never
     // writing (see each `*_session_args`). Only meaningful alongside `read_only`.
     web: bool,
@@ -4514,6 +4676,9 @@ pub async fn agent_session(
     // the frontend). None/empty = MCP stays off. Honored for host Claude/Copilot/
     // opencode and container Claude/Copilot/opencode/Codex (the composer gates it).
     mcp_servers: Option<Vec<crate::mcp::McpServerSpec>>,
+    // Explicitly mount our read-only, remote-bound MCP server on the host.
+    mcp_self: Option<bool>,
+    mcp_self_remote: Option<String>,
     on_event: Channel<ReviewEvent>,
 ) -> AppResult<Option<ReviewEvent>> {
     if !valid_cancel_id(&session_id) {
@@ -4536,6 +4701,7 @@ pub async fn agent_session(
             )));
         }
     };
+    validate_session_permission_mode(kind, permission_mode.as_deref(), read_only)?;
     let agent_name = match kind {
         AgentKind::Codex => "codex",
         AgentKind::Claude => "claude",
@@ -4552,7 +4718,15 @@ pub async fn agent_session(
     // to whichever CLI this is in its own form. The composer gates selection to the
     // supported (agent, isolation) combos, so an unsupported one arriving here with
     // servers is an error, not a silent drop.
-    let mcp_specs = mcp_servers.unwrap_or_default();
+    let mcp_self = mcp_self.unwrap_or(false);
+    let mcp_specs = session_mcp_specs(
+        kind,
+        container,
+        &worktree_path,
+        mcp_self,
+        mcp_self_remote.as_deref(),
+        mcp_servers.unwrap_or_default(),
+    )?;
     // `mcp__<server>` allowlist entries — loading a server via `--mcp-config` does
     // NOT admit its tools past `--tools`. Claude only (host and container).
     let mcp_tools = crate::mcp::tool_allow_patterns(&mcp_specs);
@@ -4564,8 +4738,8 @@ pub async fn agent_session(
     //  - Copilot: host `--additional-mcp-config @<path>`; container = the auto-loaded
     //    `~/.copilot/mcp-config.json` in the mounted home. No allowlist needed.
     //  - opencode: the `OPENCODE_CONFIG` env var (host spawn env / container `-e`).
-    //  - Codex: container ONLY (host Codex cancels every MCP tool call — stdin EOF →
-    //    "declined", upstream), stdio servers only, via `~/.codex/config.toml`.
+    //  - Codex: third-party stdio servers in a container's `~/.codex/config.toml`;
+    //    host self-MCP uses only the generated read-only entry via `-c` overrides.
     // Host configs are written here; container ones in the container branch below.
     let mut mcp_config_path: Option<String> = None;
     if !mcp_specs.is_empty() {
@@ -4605,12 +4779,8 @@ pub async fn agent_session(
                 }
             }
             (AgentKind::Codex, false) => {
-                return Err(AppError::Command(
-                    "Codex runs MCP servers in container sessions only — host Codex can't \
-                     approve MCP tool calls. Turn on container isolation in Settings → AI, \
-                     or start a new session with Isolation set to Container (composer → Options)."
-                        .into(),
-                ));
+                // Only our native-generated spec reaches this arm; its config is
+                // passed via invocation overrides, with read tools pre-approved.
             }
         }
     }
@@ -4649,15 +4819,20 @@ pub async fn agent_session(
             )
         }
         AgentKind::Codex => (
-            codex_session_args(
-                &model,
-                resume,
-                container,
-                native_session_id.as_deref(),
-                &effort,
-                read_only,
-                web,
-            ),
+            codex_session_mcp_args(
+                codex_session_args(
+                    &model,
+                    resume,
+                    container,
+                    native_session_id.as_deref(),
+                    &effort,
+                    read_only,
+                    web,
+                ),
+                mcp_self,
+                &worktree_path,
+                mcp_self_remote.as_deref(),
+            )?,
             if resume {
                 user_prompt
             } else {
@@ -4713,6 +4888,8 @@ pub async fn agent_session(
             )
         }
     };
+
+    let inner = session_permission_args(kind, inner, permission_mode.as_deref(), read_only)?;
 
     // Container isolation: wrap the same invocation in an ephemeral,
     // worktree-confined container. The agent CLI lives in the image, so we don't
@@ -7572,6 +7749,226 @@ opencode/x-preview-f-free
                 }
             }
         }
+    }
+
+    #[test]
+    fn session_self_mcp_is_native_built_in_only_on_each_host_harness() {
+        for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Copilot, AgentKind::Opencode] {
+            assert!(session_mcp_specs(kind, false, "/repo", false, None, vec![]).unwrap().is_empty());
+            let specs = session_mcp_specs(kind, false, "/repo", true, Some("upstream"), vec![]).unwrap();
+            assert_eq!(specs.len(), 1);
+            assert_eq!(specs[0].name, "gitdesktop");
+            assert_eq!(specs[0].args, ["mcp", "--repo", "/repo", "--remote", "upstream"]);
+            assert!(!specs[0].command.is_empty());
+            assert!(specs[0].secret_keys.is_empty());
+            assert!(session_mcp_specs(kind, true, "/repo", true, None, vec![]).is_err());
+        }
+    }
+
+    #[test]
+    fn session_self_mcp_rejects_namespace_spoofs_and_keeps_host_codex_third_party_blocked() {
+        let foreign = || {
+            let mut spec = crate::mcp::self_server_spec("/repo").unwrap();
+            spec.id = "other".into();
+            spec.name = "other".into();
+            spec.command = "untrusted-server".into();
+            spec
+        };
+        for enabled in [false, true] {
+            assert!(session_mcp_specs(AgentKind::Codex, false, "/repo", enabled, None, vec![foreign()]).is_err());
+        }
+        for kind in [AgentKind::Claude, AgentKind::Copilot, AgentKind::Opencode] {
+            let specs = session_mcp_specs(kind, false, "/repo", true, None, vec![foreign()]).unwrap();
+            assert_eq!(specs.len(), 2);
+            assert!(specs.iter().any(|spec| spec.command == "untrusted-server"));
+            for field in ["id", "name"] {
+                let mut spoof = foreign();
+                if field == "id" { spoof.id = "gitdesktop".into(); } else { spoof.name = "gitdesktop".into(); }
+                assert!(session_mcp_specs(kind, false, "/repo", true, None, vec![spoof]).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn codex_session_self_mcp_preserves_resume_and_sandbox_without_global_bypass() {
+        for resume in [false, true] {
+            for read_only in [false, true] {
+                let original = codex_session_args("chosen", resume, false, Some("this-thread"), "high", read_only, false);
+                assert_eq!(codex_session_mcp_args(original.clone(), false, "/repo", None).unwrap(), original);
+                let args = codex_session_mcp_args(original, true, "/repo", Some("upstream")).unwrap();
+                let config_at = args.iter().position(|arg| arg.starts_with("mcp_servers.gitdesktop=")).expect("built-in MCP config");
+                assert_eq!(args[config_at - 1], "-c");
+                assert_eq!(flag_value(&args, "-s"), Some(if read_only { "read-only" } else { "workspace-write" }));
+                assert_eq!(flag_value(&args, "-m"), Some("chosen"));
+                assert_eq!(args.last().map(String::as_str), Some("-"));
+                assert!(!args.iter().any(|arg| arg.contains("dangerously")));
+                if resume {
+                    let at = args.iter().position(|arg| arg == "resume").unwrap();
+                    assert!(config_at < at);
+                    assert_eq!(args[at + 1], "this-thread");
+                }
+            }
+        }
+    }
+
+    fn permission_test_args(kind: AgentKind, read_only: bool, resume: bool) -> Vec<String> {
+        match kind {
+            AgentKind::Claude => claude_session_args(
+                "test-model", "system", "app-session", resume, false, read_only, false,
+                Some("/safe/mcp.json"), &["mcp__gitdesktop".into()],
+            ),
+            AgentKind::Codex => codex_session_args(
+                "test-model", resume, false, Some("native-thread"), "high", read_only, true,
+            ),
+            AgentKind::Copilot => copilot_session_args(
+                "test-model", "app-session", resume, "/repo", "current question", "high",
+                read_only, false, Some("/safe/mcp.json"),
+            ),
+            AgentKind::Opencode => opencode_session_args(
+                "provider/model", "native-thread", resume, "high", read_only, false, "/repo",
+            ),
+        }
+    }
+
+    #[test]
+    fn omitted_session_permission_mode_keeps_existing_callers_unchanged() {
+        for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Copilot, AgentKind::Opencode] {
+            for read_only in [false, true] {
+                for resume in [false, true] {
+                    let original = permission_test_args(kind, read_only, resume);
+                    let actual = session_permission_args(kind, original.clone(), None, read_only).unwrap();
+                    assert_eq!(actual, original);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_session_permission_mode_rejects_cross_harness_or_inconsistent_profiles() {
+        let profiles = [
+            (AgentKind::Codex, "read-only", true),
+            (AgentKind::Codex, "auto", false),
+            (AgentKind::Codex, "full-access", false),
+            (AgentKind::Claude, "plan", true),
+            (AgentKind::Claude, "default", false),
+            (AgentKind::Claude, "auto", false),
+            (AgentKind::Claude, "acceptEdits", false),
+            (AgentKind::Claude, "bypassPermissions", false),
+            (AgentKind::Copilot, "read-only", true),
+            (AgentKind::Copilot, "allow-tools", false),
+            (AgentKind::Copilot, "full-access", false),
+            (AgentKind::Opencode, "plan", true),
+            (AgentKind::Opencode, "default", false),
+            (AgentKind::Opencode, "auto", false),
+        ];
+        for (kind, mode, read_only) in profiles {
+            validate_session_permission_mode(kind, Some(mode), read_only).unwrap();
+            assert!(validate_session_permission_mode(kind, Some(mode), !read_only).is_err());
+        }
+        for (kind, mode) in [
+            (AgentKind::Codex, "plan"),
+            (AgentKind::Claude, "read-only"),
+            (AgentKind::Copilot, "default"),
+            (AgentKind::Opencode, "full-access"),
+        ] {
+            assert!(validate_session_permission_mode(kind, Some(mode), false).is_err());
+        }
+        assert!(validate_session_permission_mode(AgentKind::Codex, Some(""), false).is_err());
+    }
+
+    #[test]
+    fn codex_explicit_permissions_set_the_actual_sandbox_before_resume() {
+        for resume in [false, true] {
+            for container in [false, true] {
+                for (mode, policy, read_only) in [
+                    ("read-only", "read-only", true),
+                    ("auto", "workspace-write", false),
+                    ("full-access", "danger-full-access", false),
+                ] {
+                    let original = codex_session_args(
+                        "test-model", resume, container, Some("native-thread"), "high", read_only, true,
+                    );
+                    let args = session_permission_args(AgentKind::Codex, original, Some(mode), read_only).unwrap();
+                    assert_eq!(flag_value(&args, "-s"), Some(policy));
+                    assert!(!args.iter().any(|arg| arg.contains("dangerously-bypass")));
+                    assert_eq!(flag_value(&args, "-m"), Some("test-model"));
+                    assert_eq!(args.last().map(String::as_str), Some("-"));
+                    assert_eq!(args.iter().any(|arg| arg == "sandbox_workspace_write.network_access=true"), mode == "auto");
+                    assert!(args.iter().any(|arg| arg == "model_reasoning_effort=\"high\""));
+                    assert!(args.iter().any(|arg| arg == "web_search=\"live\""));
+                    if resume {
+                        let at = args.iter().position(|arg| arg == "resume").unwrap();
+                        assert!(args.iter().position(|arg| arg == "-s").unwrap() < at);
+                        assert_eq!(args[at + 1], if container { "--last" } else { "native-thread" });
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn claude_explicit_permissions_replace_the_previous_bypass_on_every_turn() {
+        for resume in [false, true] {
+            for mode in ["plan", "default", "auto", "acceptEdits", "bypassPermissions"] {
+                let read_only = mode == "plan";
+                let args = session_permission_args(
+                    AgentKind::Claude, permission_test_args(AgentKind::Claude, read_only, resume),
+                    Some(mode), read_only,
+                ).unwrap();
+                assert_eq!(flag_value(&args, "--permission-mode"), if mode == "default" { None } else { Some(mode) });
+                assert_eq!(flag_value(&args, "--allowedTools"), Some("mcp__gitdesktop"));
+                assert_eq!(flag_value(&args, "--model"), Some("test-model"));
+                assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
+                assert_eq!(tools_of(&args).contains("Write"), !read_only);
+                assert_eq!(flag_value(&args, if resume { "--resume" } else { "--session-id" }), Some("app-session"));
+            }
+        }
+    }
+
+    #[test]
+    fn copilot_explicit_permissions_keep_denies_or_select_native_all_paths() {
+        for mode in ["read-only", "allow-tools", "full-access"] {
+            let read_only = mode == "read-only";
+            let args = session_permission_args(
+                AgentKind::Copilot, permission_test_args(AgentKind::Copilot, read_only, true),
+                Some(mode), read_only,
+            ).unwrap();
+            assert!(args.iter().any(|arg| arg == "--allow-all-tools"));
+            assert_eq!(args.iter().any(|arg| arg == "--allow-all-paths"), mode == "full-access");
+            assert_eq!(args.iter().any(|arg| arg == "--deny-tool=write"), read_only);
+            assert_eq!(args.iter().any(|arg| arg == "--deny-tool=shell"), read_only);
+            assert_eq!(flag_value(&args, "--add-dir"), if read_only { None } else { Some("/repo") });
+            assert_eq!(flag_value(&args, "--additional-mcp-config"), Some("@/safe/mcp.json"));
+            assert_eq!(flag_value(&args, "--resume"), Some("app-session"));
+        }
+    }
+
+    #[test]
+    fn opencode_explicit_permissions_use_documented_auto_and_plan_modes() {
+        for mode in ["plan", "default", "auto"] {
+            let read_only = mode == "plan";
+            let args = session_permission_args(
+                AgentKind::Opencode, permission_test_args(AgentKind::Opencode, read_only, true),
+                Some(mode), read_only,
+            ).unwrap();
+            assert!(!args.iter().any(|arg| arg == "--dangerously-skip-permissions"));
+            assert_eq!(args.iter().any(|arg| arg == "--auto"), mode == "auto");
+            assert_eq!(flag_value(&args, "--agent"), if read_only { Some("plan") } else { None });
+            assert_eq!(flag_value(&args, "--dir"), Some("/repo"));
+            assert_eq!(flag_value(&args, "--session"), Some("native-thread"));
+        }
+    }
+
+    #[test]
+    fn codex_full_access_keeps_the_built_in_mcp_read_only_and_separately_scoped() {
+        let original = codex_session_mcp_args(
+            permission_test_args(AgentKind::Codex, false, true), true, "/repo", Some("upstream"),
+        ).unwrap();
+        let args = session_permission_args(AgentKind::Codex, original, Some("full-access"), false).unwrap();
+        assert_eq!(flag_value(&args, "-s"), Some("danger-full-access"));
+        let config = args.iter().find(|arg| arg.starts_with("mcp_servers.gitdesktop=")).unwrap();
+        assert!(config.contains("enabled_tools=["));
+        assert!(!config.contains("--allow-"));
     }
 
     #[test]

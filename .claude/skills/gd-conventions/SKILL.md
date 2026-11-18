@@ -567,13 +567,28 @@ and table row are the reference).
   `buildPrSnapshotContext` proves the displayed patch against the pinned pair.
   Keep its partial patch for collapsed native gaps; hold late content while a
   line composer is open, including queued deferred models.
+  Render-time retention uses `useLineComposerOpen` from `line-composer-store`;
+  a raw DOM probe is only an event-time guard. Non-code and pending file arms use
+  `PrFileContextMarker` with the captured slot's path/head. Pending markers block
+  chat context until ready; they must never relabel retained bytes as a new head.
 - Prepare only the active MR's selected file with `usePrDiffContextWarmup`;
   share `prSnapshotComparisonOptions` with its consumer and keep loading/error
   notices retained with the patch. Never prefetch every MR's file contents.
-- MR chat reuses read-only `runAgentSession`, the `SessionConversationView`
+- MR chat reuses `runAgentSession`, the `SessionConversationView`
   transcript, and existing CLI pickers. Persist explicit host/project/IID and
   repository scope; list only active sessions, never infer scope from prompts.
-  Attachments use painted file identities and pinned snapshot verification.
+  Each chat stores its harness-specific `permissionMode` and derived `readOnly`,
+  frozen for the complete in-flight turn; send the current permission block on
+  resumed turns too. New native sessions receive the MR link only; every turn
+  names the painted file's exact before/after paths and commits. Never load the
+  whole MR diff for chat. Attachments use painted identities and pinned snapshot
+  verification. Queue Add to chat requests under MR/repo/head scope so expanding
+  a collapsed chat cannot drop the selection or replace a newer request.
+  Mount the read-only self-MCP per invocation, bound to the selected remote.
+  Host Codex approves only this generated server's read catalog; unrelated user
+  MCP configuration and approval policies stay as configured. File-reference
+  navigation opts into the shared agent transcript's `onOpenFile` callback;
+  normal task sessions keep their external-editor behavior.
 - MR import links use `PrCodeImportLinks`, `usePrImportNavigation`, and
   the language-specific scanner/resolver dispatch in `code-import-languages`
   and `code-import-resolution`: decorate only code HTML islands or native
@@ -774,6 +789,9 @@ build-order lottery (tailwind-merge 3.6.0; in-repo: `data-open:animate-none!`).
   shared account baseline so the loader and visible view cannot reset each other.
   MR cache keys include status and saved watch URLs; a watch-list change may
   retain rows within one status, never carry Open rows into Merged.
+- My works proves a checkout's live origin before starting the optional worktree
+  preference budget. A slow proof cannot mean the checkout is absent; it keeps
+  its backend timeout and yields to newer navigation between reads.
 - `<Activity>`-hidden subtrees still render but hold no query observers, so
   they fetch nothing while hidden; the re-show refetches anything past its
   staleTime. Keep a heavy query's `enabled` gated on the active tab as a
@@ -1462,9 +1480,14 @@ one grep away on the named symbol. Grows via Conventions-sync.
   follows these per-harness defaults; an explicit empty pick uses the CLI's own
   default. Existing conversations retain their stored values.
 - **Host Codex resumes require a native ID** at `runAgentSession`; `--last` can
-  attach an unrelated conversation in the shared CLI home. Only read-only MR
-  chat rebuilds missing sessions from saved messages: one exact missing-thread
-  failure before output, after transport settlement, with fresh filtered context.
+  attach an unrelated conversation in the shared CLI home. Only MR chat rebuilds
+  missing sessions from saved messages: one exact missing-thread failure before
+  output or tools, after transport settlement, with the MR link, current file
+  versions and the turn's original permissions. Never replay completed actions.
+  Legacy Claude chats retire their old fixed system prompt using a new native
+  UUID and bounded saved messages; ready neutral-prompt sessions resume normally.
+  An MR OpenCode chat without a nonblank native ID also starts fresh with saved
+  messages; its generic `--continue` fallback can select another conversation.
   Plan/Research and write sessions keep their own recovery paths.
 - **Per-record repo scope** — a record offered per-repo-or-globally carries a
   `scope` string: the `"global"` sentinel (also the absent-value default) or

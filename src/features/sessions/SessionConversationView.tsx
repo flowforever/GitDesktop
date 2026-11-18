@@ -21,6 +21,7 @@ export function SessionConversationView({
   editDiffLive,
   resendable = true,
   onEditResend,
+  onOpenFile,
   readOnly = false,
   terminalOpen = false,
   footer,
@@ -31,6 +32,7 @@ export function SessionConversationView({
   editDiffLive?: boolean;
   resendable?: boolean;
   onEditResend?: (prompt: string) => void;
+  onOpenFile?: (reference: string) => void;
   readOnly?: boolean;
   terminalOpen?: boolean;
   footer: ReactNode;
@@ -118,6 +120,7 @@ export function SessionConversationView({
                 editDiffLive={editDiffLive}
                 resendable={resendable}
                 onEditResend={() => onEditResend?.(turn.prompt)}
+                onOpenFile={onOpenFile}
                 readOnly={readOnly}
               />
             ))}
@@ -168,6 +171,7 @@ function TurnView({
   editDiffLive,
   resendable,
   onEditResend,
+  onOpenFile,
   readOnly,
 }: {
   turn: SessionTurn;
@@ -179,6 +183,7 @@ function TurnView({
   /** Whether edit & resend is available (false for a kept session — no composer). */
   resendable: boolean;
   onEditResend: () => void;
+  onOpenFile?: (reference: string) => void;
   readOnly: boolean;
 }) {
   const running = turn.status === "running" || turn.status === "committing";
@@ -205,10 +210,15 @@ function TurnView({
             baseDir={baseDir}
             editDiffBase={editDiffBase}
             editDiffLive={editDiffLive}
+            onOpenFile={onOpenFile}
           />
         ) : turn.narration ? (
           // Reloaded session (segments are in-memory) or a whole-message agent.
-          <AgentNarration text={turn.narration} baseDir={baseDir} />
+          <AgentNarration
+            text={turn.narration}
+            baseDir={baseDir}
+            onOpenFile={onOpenFile}
+          />
         ) : (
           !running &&
           turn.status !== "error" && (

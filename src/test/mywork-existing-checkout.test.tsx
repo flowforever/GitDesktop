@@ -14,6 +14,7 @@ import { ConnectWorkRepoDialog } from "@/features/mywork/ConnectWorkRepoDialog";
 import { MyWorkScreen } from "@/features/mywork/MyWorkScreen";
 import { CloneRepoDialog } from "@/features/welcome/CloneRepoDialog";
 import type { MyWorkItem, RepoInfo, RepoOrigin } from "@/lib/git/types";
+import type { UserWorktree } from "@/lib/git/worktree";
 import {
   type AppSettings,
   DEFAULT_SETTINGS,
@@ -60,6 +61,9 @@ let directories: Set<string>;
 let checkouts: Map<string, RepoOrigin>;
 let validationWait: Promise<RepoInfo> | null;
 let originWait: Promise<RepoOrigin> | null;
+let originWaitAfter: number;
+let originReads: number;
+let worktreeWait: Promise<UserWorktree[]> | null;
 let previousTransport: ReturnType<typeof getTransport>;
 const clients: QueryClient[] = [];
 const originalScrollTo = Object.getOwnPropertyDescriptor(
@@ -124,6 +128,9 @@ beforeEach(() => {
   checkouts = new Map([[ROOT, ORIGIN]]);
   validationWait = null;
   originWait = null;
+  originWaitAfter = 1;
+  originReads = 0;
+  worktreeWait = null;
   useUiStore.setState(useUiStore.getInitialState(), true);
   installTransport({
     invoke: async <T,>(
@@ -148,8 +155,11 @@ beforeEach(() => {
         throw { kind: "notARepo", message: `not a git repository: ${path}` };
       }
       if (command === "repo_origin_path") {
-        if (String(args?.repoPath) === ROOT && originWait)
-          return (await originWait) as T;
+        if (String(args?.repoPath) === ROOT) {
+          originReads += 1;
+          if (originWait && originReads >= originWaitAfter)
+            return (await originWait) as T;
+        }
         return (checkouts.get(String(args?.repoPath)) ?? {
           host: "",
           authority: "",
@@ -157,7 +167,8 @@ beforeEach(() => {
           provider: "",
         }) as T;
       }
-      if (command === "git_worktree_list_user") return [] as T;
+      if (command === "git_worktree_list_user")
+        return (worktreeWait ? await worktreeWait : []) as T;
       if (command === "forge_clone") return ROOT as T;
       throw new Error(`Unexpected command: ${command}`);
     },
@@ -211,6 +222,160 @@ async function submitClone() {
 }
 
 describe("My works existing checkout discovery", () => {
+  const registeredCheckout = (): RecentRepo => ({
+    path: ROOT,
+    name: ITEM.repoName,
+    owner: ITEM.repoOwner,
+    repoName: ITEM.repoName,
+    host: ITEM.host,
+    provider: ITEM.provider,
+    lastOpenedAt: OTHER.lastOpenedAt,
+  });
+
+  it("waits for a registered checkout's live origin beyond the optional worktree budget", async () => {
+    const pending = deferred<RepoOrigin>();
+    originWait = pending.promise;
+    settings.recentRepos = [registeredCheckout()];
+    show(<MyWorkScreen />);
+    const row = await screen.findByText(ITEM.title);
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    fireEvent.click(row);
+    await waitFor(() => expect(originReads).toBe(1));
+
+    now += 2000;
+    await act(async () => pending.resolve(ORIGIN));
+
+    await waitFor(() =>
+      expect(useUiStore.getState().selectedPr?.id).toBe(String(ITEM.number)),
+    );
+    expect(useUiStore.getState().repoPath).toBe(ROOT);
+    expect(screen.queryByText("Connect a local repository")).toBeNull();
+    expect(
+      calls.filter(
+        (call) => call.command === "validate_repo" && call.args?.path === ROOT,
+      ),
+    ).toHaveLength(1);
+    expect(registered).toEqual([]);
+  });
+
+  it("opens a newly saved picker connection even when its next live proof is slow", async () => {
+    settings.recentRepos = [];
+    const pending = deferred<RepoOrigin>();
+    originWait = pending.promise;
+    originWaitAfter = 2;
+    vi.mocked(openDirectory).mockResolvedValue(ROOT);
+    show(<MyWorkScreen />);
+    fireEvent.click(await screen.findByText(ITEM.title));
+    const choose = await screen.findByRole("button", {
+      name: "Choose local repository",
+    });
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    fireEvent.click(choose);
+    await waitFor(() =>
+      expect(
+        originReads >= 2 ||
+          useUiStore.getState().selectedPr?.id === String(ITEM.number),
+      ).toBe(true),
+    );
+
+    now += 2000;
+    await act(async () => pending.resolve(ORIGIN));
+
+    await waitFor(() =>
+      expect(useUiStore.getState().selectedPr?.id).toBe(String(ITEM.number)),
+    );
+    expect(screen.queryByText("Connect a local repository")).toBeNull();
+    expect(registered).toHaveLength(1);
+    expect(settings.recentRepos[0]).toMatchObject({
+      path: ROOT,
+      host: ITEM.host,
+      owner: ITEM.repoOwner,
+      repoName: ITEM.repoName,
+      provider: ITEM.provider,
+    });
+  });
+
+  it("still requests a connection when a slow live origin proves another namespace", async () => {
+    const pending = deferred<RepoOrigin>();
+    originWait = pending.promise;
+    settings.recentRepos = [registeredCheckout()];
+    show(<MyWorkScreen />);
+    const row = await screen.findByText(ITEM.title);
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    fireEvent.click(row);
+    await waitFor(() => expect(originReads).toBe(1));
+
+    now += 2000;
+    await act(async () =>
+      pending.resolve({ ...ORIGIN, path: "another/jorm-lib" }),
+    );
+
+    expect(await screen.findByText("Connect a local repository")).toBeTruthy();
+    expect(useUiStore.getState().selectedPr).toBeNull();
+    expect(registered).toEqual([]);
+  });
+
+  it("retires a slow origin proof after a newer Settings navigation", async () => {
+    const pending = deferred<RepoOrigin>();
+    originWait = pending.promise;
+    settings.recentRepos = [registeredCheckout()];
+    show(<MyWorkScreen />);
+    const row = await screen.findByText(ITEM.title);
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    fireEvent.click(row);
+    await waitFor(() => expect(originReads).toBe(1));
+
+    now += 2000;
+    act(() => useUiStore.getState().openSettings());
+    await act(async () => pending.resolve(ORIGIN));
+
+    expect(useUiStore.getState().view).toBe("settings");
+    expect(useUiStore.getState().workDocuments.documents).toHaveLength(0);
+    expect(screen.queryByText("Connect a local repository")).toBeNull();
+    expect(registered).toEqual([]);
+  });
+
+  it("keeps the optional worktree budget after the checkout is proven", async () => {
+    settings.recentRepos = [registeredCheckout()];
+    const pending = deferred<UserWorktree[]>();
+    worktreeWait = pending.promise;
+    show(<MyWorkScreen />);
+    const row = await screen.findByText(ITEM.title);
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(
+        calls.some((call) => call.command === "git_worktree_list_user"),
+      ).toBe(true),
+    );
+
+    now += 2000;
+    const tree = (path: string, isMain: boolean): UserWorktree => ({
+      path,
+      branch: isMain ? "main" : "review",
+      head: "a".repeat(40),
+      isMain,
+      isDetached: false,
+      isLocked: false,
+      lockReason: "",
+      lastActivityMs: null,
+    });
+    await act(async () =>
+      pending.resolve([tree(ROOT, true), tree(`${ROOT}-review`, false)]),
+    );
+
+    await waitFor(() =>
+      expect(useUiStore.getState().selectedPr?.id).toBe(String(ITEM.number)),
+    );
+    expect(useUiStore.getState().repoPath).toBe(ROOT);
+    expect(calls.some((call) => call.command.includes("head_ref"))).toBe(false);
+  });
+
   it.each(["missing", "unclassified", "stale"] as const)(
     "opens the existing default clone target when recent metadata is %s",
     async (classification) => {

@@ -1,0 +1,1 @@
+- Add selected diff code to chat without replacing a draft. Open file links in chat answers in the MR's diff or source view and reveal them in the file tree.

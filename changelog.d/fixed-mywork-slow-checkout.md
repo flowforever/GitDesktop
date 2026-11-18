@@ -1,0 +1,1 @@
+- Opening an MR reuses its verified local repository even when checkout checks are slow, instead of repeatedly asking to connect or clone it.

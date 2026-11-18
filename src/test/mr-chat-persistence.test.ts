@@ -54,6 +54,133 @@ beforeEach(() => {
 });
 
 describe("durable MR conversation scope", () => {
+  it.each([
+    ["codex", "auto"],
+    ["claude", "bypassPermissions"],
+    ["copilot", "allow-tools"],
+    ["opencode", "auto"],
+  ])(
+    "migrates %s chats to the CLI profile matching their prior edit permission",
+    async (agent, permissionMode) => {
+      disk.value = [record("legacy", { agent, readOnly: false })];
+      expect((await loadMrChats())[0]).toMatchObject({
+        permissionMode,
+        readOnly: false,
+      });
+    },
+  );
+
+  it("roundtrips a selected full-access profile", async () => {
+    disk.value = [
+      record("selected", { readOnly: false, permissionMode: "full-access" }),
+    ];
+    const sessions = await loadMrChats();
+    await saveMrChats(sessions);
+    expect((await loadMrChats())[0]).toMatchObject({
+      permissionMode: "full-access",
+      readOnly: false,
+    });
+  });
+
+  it.each(["bypassPermissions", "unknown", null, 0, {}, undefined])(
+    "refuses a malformed or cross-harness saved profile (%j)",
+    async (permissionMode) => {
+      disk.value = [record("invalid", { readOnly: false, permissionMode })];
+      expect((await loadMrChats())[0]).toMatchObject({
+        permissionMode: "read-only",
+        readOnly: true,
+      });
+    },
+  );
+
+  it("keeps an inconsistent saved profile read-only", async () => {
+    disk.value = [
+      record("inconsistent", { readOnly: true, permissionMode: "full-access" }),
+    ];
+    expect((await loadMrChats())[0]).toMatchObject({
+      permissionMode: "read-only",
+      readOnly: true,
+    });
+  });
+
+  it("allows edits in legacy chats without a saved permission flag", async () => {
+    disk.value = [record("legacy")];
+    expect((await loadMrChats())[0].readOnly).toBe(false);
+  });
+
+  it.each([true, false])(
+    "persists an explicit read-only mode of %s",
+    async (readOnly) => {
+      disk.value = [record("permission", { readOnly })];
+      const [session] = await loadMrChats();
+      expect(session.readOnly).toBe(readOnly);
+      await saveMrChats([session]);
+      expect((await loadMrChats())[0].readOnly).toBe(readOnly);
+    },
+  );
+
+  it.each([null, undefined, 0, 1, "false", "true", [], {}])(
+    "keeps an invalid saved permission flag (%j) read-only",
+    async (readOnly) => {
+      disk.value = [record("invalid-permission", { readOnly })];
+      expect((await loadMrChats())[0].readOnly).toBe(true);
+    },
+  );
+
+  it.each([true, false])(
+    "roundtrips a validated Claude CLI session with readiness %s",
+    async (claudeSessionReady) => {
+      const claudeSessionId = "72ec53b8-e757-44ca-8059-79d4b486f35e";
+      disk.value = [
+        record("claude-chat", {
+          agent: "claude",
+          claudeSessionId,
+          claudeSessionReady,
+        }),
+      ];
+      const [session] = await loadMrChats();
+      expect(session).toMatchObject({ claudeSessionId, claudeSessionReady });
+      await saveMrChats([session]);
+      expect((await loadMrChats())[0]).toMatchObject({
+        claudeSessionId,
+        claudeSessionReady,
+      });
+    },
+  );
+
+  it.each([null, undefined, "", "not-a-uuid", "--resume", 1, [], {}])(
+    "rejects an invalid Claude session ID (%j) even when marked ready",
+    async (claudeSessionId) => {
+      disk.value = [
+        record("legacy-claude", {
+          agent: "claude",
+          claudeSessionId,
+          claudeSessionReady: true,
+        }),
+      ];
+      const [session] = await loadMrChats();
+      expect(session.claudeSessionId).toBeUndefined();
+      expect(session.claudeSessionReady).not.toBe(true);
+    },
+  );
+
+  it.each([null, undefined, 0, 1, "true", [], {}])(
+    "does not trust a nonboolean Claude readiness flag (%j)",
+    async (claudeSessionReady) => {
+      const claudeSessionId = "72ec53b8-e757-44ca-8059-79d4b486f35e";
+      disk.value = [
+        record("claude-chat", {
+          agent: "claude",
+          claudeSessionId,
+          claudeSessionReady,
+        }),
+      ];
+      const [session] = await loadMrChats();
+      expect(session.claudeSessionId).toBe(claudeSessionId);
+      expect(session.claudeSessionReady).toBe(false);
+    },
+  );
+
   it("requires explicit scope metadata and never recovers a scope from prompt text", async () => {
     disk.value = [
       record("scoped"),

@@ -88,7 +88,7 @@ const MARK_CLASSES = [
 
 /** Strip a trailing `:line[:col]` or `#Lx` locator before resolving the path. */
 function filePathOf(raw: string): string {
-  return raw.trim().replace(/[:#].*$/, "");
+  return raw.trim().replace(/(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)$/, "");
 }
 
 function isFilePath(raw: string): boolean {
@@ -102,18 +102,16 @@ function isFilePath(raw: string): boolean {
   return KNOWN_EXT.has(core.slice(dot + 1).toLowerCase());
 }
 
-/**
- * Renders the agent's streamed Markdown narration, then post-processes it so
- * inline-code spans that look like file paths become clickable links that open
- * the file (resolved against the session's worktree) in the user's editor —
- * without modifying the shared Markdown renderer.
- */
+/** Inline file references open in the editor unless the host supplies an in-app
+ * navigator; only that opted-in host claims Markdown file links. */
 export function AgentNarration({
   text,
   baseDir,
+  onOpenFile,
 }: {
   text: string;
   baseDir: string;
+  onOpenFile?: (reference: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const openFile = useOpenFile();
@@ -163,8 +161,28 @@ export function AgentNarration({
       "[data-gd-file]",
     );
     const rel = el?.getAttribute("data-gd-file");
-    if (rel) openFile(baseDir, rel);
+    if (rel) {
+      if (onOpenFile) onOpenFile(el?.textContent?.trim() || rel);
+      else openFile(baseDir, rel);
+    }
     return Boolean(rel);
+  };
+
+  const onFileLink = (e: React.MouseEvent) => {
+    if (!onOpenFile || (e.type === "auxclick" && e.button !== 1)) return;
+    const anchor = (e.target as HTMLElement | null)?.closest("a[href]");
+    const reference = anchor?.getAttribute("href")?.trim();
+    if (
+      !reference ||
+      reference.startsWith("#") ||
+      /^[\\/]{2}/.test(reference) ||
+      (/^[a-z][a-z\d+.-]*:/i.test(reference) &&
+        !/^[a-z]:[\\/]/i.test(reference))
+    )
+      return;
+    e.preventDefault();
+    e.stopPropagation();
+    onOpenFile(reference);
   };
 
   const onClick = (e: React.MouseEvent) => {
@@ -187,6 +205,8 @@ export function AgentNarration({
   return (
     <div
       ref={ref}
+      onClickCapture={onFileLink}
+      onAuxClickCapture={onFileLink}
       onClick={onClick}
       onAuxClick={onAuxClick}
       onKeyDown={onKeyDown}

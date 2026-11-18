@@ -65,6 +65,7 @@ function saved(): MrChatSession {
     agent: "codex",
     model: "chosen-model",
     effort: "xhigh",
+    readOnly: true,
     nativeSessionId: OLD_ID,
     state: "active",
     running: false,
@@ -117,7 +118,23 @@ beforeEach(() => {
 });
 
 describe("missing Codex MR conversation", () => {
-  it("rebuilds the same chat from prior messages and freshly filtered MR context", async () => {
+  it("keeps edits allowed when recovering a write-enabled conversation", async () => {
+    useMrChatStore.setState({ sessions: [{ ...saved(), readOnly: false }] });
+    external.run.mockImplementationOnce(async (args: AgentSessionArgs) => {
+      args.onEvent(missing());
+      return null;
+    });
+    send();
+    await finished();
+    expect(external.run.mock.calls.map(([args]) => args.readOnly)).toEqual([
+      false,
+      false,
+    ]);
+    expect(current().readOnly).toBe(false);
+    expect(current().turns.at(-1)?.status).toBe("done");
+  });
+
+  it("rebuilds the same chat from prior messages and its MR link without loading the whole diff", async () => {
     const loadDiff = vi
       .fn()
       .mockResolvedValueOnce("+oldPatch()")
@@ -141,16 +158,18 @@ describe("missing Codex MR conversation", () => {
     });
     for (const text of [
       context.url,
-      context.title,
       "What does this MR change?",
       "It refreshes the cache after writes.",
       "Please continue",
-      "+currentPatch()",
     ])
       expect(retry.userPrompt).toContain(text);
     expect(retry.userPrompt).not.toContain("+oldPatch()");
     expect(retry.userPrompt).not.toContain("no rollout found");
-    expect(external.filter).toHaveBeenCalledTimes(2);
+    expect(loadDiff).not.toHaveBeenCalled();
+    expect(external.filter).not.toHaveBeenCalled();
+    expect(external.run.mock.calls[0][0].userPrompt).not.toContain(context.url);
+    expect(retry.userPrompt).not.toContain(context.body);
+    expect(retry.userPrompt).not.toContain("+currentPatch()");
     expect(current().id).toBe("saved-chat");
     expect(current().nativeSessionId).toBe(NEW_ID);
     expect(current().turns).toHaveLength(2);
@@ -239,12 +258,13 @@ describe("missing Codex MR conversation", () => {
     expect(current().turns.at(-1)?.status).toBe("error");
   });
 
-  it("does not replay a turn that already ran a tool", async () => {
+  it("does not replay a write-enabled turn that already ran a tool", async () => {
+    useMrChatStore.setState({ sessions: [{ ...saved(), readOnly: false }] });
     external.run.mockImplementationOnce(async (args: AgentSessionArgs) => {
       args.onEvent({
         kind: "tool",
-        tool: "run",
-        target: "git show HEAD:cache.ts",
+        tool: "write",
+        target: "cache.ts",
       });
       args.onEvent(missing());
       return null;
@@ -252,6 +272,10 @@ describe("missing Codex MR conversation", () => {
     send();
     await finished();
     expect(external.run).toHaveBeenCalledTimes(1);
+    expect(external.run.mock.calls[0][0].readOnly).toBe(false);
+    expect(current().turns.at(-1)?.segments).toEqual([
+      { type: "tool", tool: "write", target: "cache.ts" },
+    ]);
   });
 
   it("honors Stop while the missing-thread transport is still settling", async () => {
@@ -341,6 +365,43 @@ describe("missing Codex MR conversation", () => {
   });
 });
 
+describe("OpenCode MR scope without a native session ID", () => {
+  it.each([null, "", "  "])(
+    "starts fresh with saved MR messages when the persisted id is %j",
+    async (nativeSessionId) => {
+      const other = {
+        ...saved(),
+        id: "other-mr-chat",
+        agent: "opencode" as const,
+        mr: { ...context.mr, number: 8 },
+        nativeSessionId: "ses_other_mr",
+      };
+      useMrChatStore.setState({
+        sessions: [{ ...saved(), agent: "opencode", nativeSessionId }, other],
+      });
+      send();
+      await finished();
+      const args = external.run.mock.calls[0][0] as AgentSessionArgs;
+      expect(args).toMatchObject({
+        agent: "opencode",
+        resume: false,
+        nativeSessionId: null,
+      });
+      expect(args.userPrompt).toContain(context.url);
+      expect(args.userPrompt).toContain("What does this MR change?");
+      expect(args.userPrompt).toContain("It refreshes the cache after writes.");
+      expect(args.userPrompt).not.toContain("ses_other_mr");
+      expect(current().nativeSessionId).toBe(NEW_ID);
+      send();
+      await finished();
+      expect(external.run.mock.calls[1][0]).toMatchObject({
+        resume: true,
+        nativeSessionId: NEW_ID,
+      });
+    },
+  );
+});
+
 describe("restored MR message history", () => {
   it("bounds old conversation data and labels omitted history without duplicating the current question", () => {
     const history = Array.from({ length: 8 }, (_, index) => ({
@@ -352,7 +413,7 @@ describe("restored MR message history", () => {
       { ...context, diff: "" },
       "Current question",
       [],
-      history,
+      { history },
     );
     expect(prompt).toContain("History truncated");
     expect(prompt).toContain("Context truncated");

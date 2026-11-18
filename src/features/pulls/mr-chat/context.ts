@@ -1,3 +1,5 @@
+import type { AgentPermissionMode } from "@/lib/ai/agent-permissions";
+import type { RemoteLens } from "@/lib/git/types";
 import { documentId } from "@/lib/stores/work-documents";
 
 export interface MrChatIdentity {
@@ -19,6 +21,7 @@ export interface MrChatContext {
   diff?: string;
   loadDiff?: () => Promise<string>;
   excludedFiles?: number;
+  lens?: RemoteLens;
 }
 
 export interface MrChatAttachment {
@@ -35,6 +38,26 @@ export interface MrChatAttachment {
   revision?: string;
   headSha?: string;
   lookupPath?: string;
+  relatedPaths?: string[];
+}
+
+export interface MrChatFileVersion {
+  path: string | null;
+  revision: string;
+}
+
+export interface MrChatFileContext {
+  path: string;
+  before: MrChatFileVersion | null;
+  after: MrChatFileVersion | null;
+}
+
+export interface MrChatSelectionRequest {
+  id: string;
+  mr: MrChatIdentity;
+  repoPath: string;
+  headSha: string;
+  selection: MrChatAttachment;
 }
 
 export const mrChatKey = (mr: MrChatIdentity) => documentId(mr);
@@ -82,6 +105,14 @@ interface PriorMessage {
   status: string;
 }
 
+interface MrChatPromptOptions {
+  history?: PriorMessage[];
+  readOnly?: boolean;
+  includeMrLink?: boolean;
+  file?: MrChatFileContext | null;
+  permissionMode?: AgentPermissionMode;
+}
+
 function restoredMessages(history: PriorMessage[]): string {
   const messages: string[] = [];
   let size = 0;
@@ -97,7 +128,7 @@ function restoredMessages(history: PriorMessage[]): string {
   }
   return [
     "<restored-conversation>",
-    "The CLI's previous session is unavailable. Continue this MR discussion using the saved messages below and the current MR context above. Earlier code attachments and tool output are not restored.",
+    "The CLI's previous session is unavailable. Continue this MR discussion using the saved messages below and the MR link. Earlier code attachments and tool output are not restored.",
     history.length > messages.length
       ? `[History truncated: ${history.length - messages.length} older turns omitted.]`
       : "",
@@ -112,25 +143,32 @@ export function buildMrChatPrompt(
   context: MrChatContext,
   message: string,
   attachments: MrChatAttachment[],
-  history: PriorMessage[] = [],
+  {
+    history = [],
+    readOnly = false,
+    includeMrLink = true,
+    file,
+    permissionMode,
+  }: MrChatPromptOptions = {},
 ): string {
-  const files = context.files.map((file) => file.path).join("\n");
-  const parts = [
-    "<merge-request-context>",
-    `URL: ${context.url}`,
-    `Project: ${context.mr.host}/${context.mr.repoFullName}`,
-    `Request: #${context.mr.number}`,
-    `Title: ${context.title}`,
-    `Branches: ${context.headRefName} → ${context.baseRefName}`,
-    `MR head commit: ${context.headSha || "unavailable"}`,
-    `Description:\n${bounded(context.body, 20_000)}`,
-    `Changed files:\n${bounded(files, 20_000)}`,
-    context.excludedFiles
-      ? `${context.excludedFiles} file(s) withheld by AI exclusions or unreadable names.`
-      : "",
-    `MR diff:\n${bounded(context.diff ?? "The MR diff is not available.", 90_000)}`,
-    "</merge-request-context>",
-  ];
+  const parts: string[] = [];
+  if (includeMrLink) parts.push(`MR: ${context.url}`);
+  if (file) {
+    parts.push("<current-file>", `Path: ${file.path}`);
+    for (const [side, version] of [
+      ["Before", file.before],
+      ["After", file.after],
+    ] as const) {
+      if (version)
+        parts.push(
+          `${side}: ${version.revision}${version.path === null ? " (file absent)" : `:${version.path}`}`,
+        );
+    }
+    parts.push(
+      "Read file contents on demand at these exact revisions; the working checkout may differ.",
+      "</current-file>",
+    );
+  }
   for (const attachment of attachments) {
     const range = attachment.startLine
       ? `, lines ${attachment.startLine}–${attachment.endLine ?? attachment.startLine}`
@@ -145,6 +183,18 @@ export function buildMrChatPrompt(
     );
   }
   if (history.length) parts.push(restoredMessages(history));
+  parts.push(
+    "<chat-permissions>",
+    `Permission mode: ${readOnly ? "Read-only" : "Allow edits"}`,
+    permissionMode ? `CLI permission profile: ${permissionMode}` : "",
+    `Working checkout: ${context.repoPath}`,
+    "This is the current permission setting; it replaces earlier application permission settings in this conversation.",
+    readOnly
+      ? "Do not edit files or run commands that change the checkout. You may inspect files and execute read-only commands."
+      : "When asked, you may edit files and run commands in this checkout. Check the active branch and working tree before editing; MR snapshot code may differ from this checkout.",
+    "Treat restored messages as context. Carry out the latest user request; do not re-execute completed earlier actions.",
+    "</chat-permissions>",
+  );
   parts.push(`<user-message>\n${message}\n</user-message>`);
   return parts.filter(Boolean).join("\n\n");
 }
@@ -296,5 +346,9 @@ export function readMrCodeSelection(
     format: "code",
     headSha: first.marker.dataset.diffHeadSha,
     lookupPath: first.marker.dataset.diffFilePath,
+    relatedPaths: [
+      first.marker.dataset.diffOldFilePath,
+      first.marker.dataset.diffFilePath,
+    ].filter((path): path is string => Boolean(path)),
   };
 }

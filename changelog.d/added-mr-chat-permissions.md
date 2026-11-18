@@ -1,0 +1,1 @@
+- Choose each MR chat's Harness and native permission mode in the sidebar header. Chats remember their permission mode and can make requested edits in the current checkout.

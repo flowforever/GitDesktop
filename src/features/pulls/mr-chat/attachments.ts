@@ -25,11 +25,19 @@ export function verifiedMrSelection(
     content.text === null
   )
     return null;
-  return verifiedText(
+  const verified = verifiedText(
     selection,
     content.text,
     old ? comparison.baseSha : comparison.headSha,
   );
+  return verified
+    ? {
+        ...verified,
+        relatedPaths: [comparison.oldPath, comparison.newPath].filter(
+          (path): path is string => path !== null,
+        ),
+      }
+    : null;
 }
 
 export function verifiedMrSourceSelection(

@@ -125,6 +125,7 @@ import {
   type Painted,
   paintedAfter,
 } from "./file-content-gate";
+import type { DiffFileVersions } from "./file-versions";
 import { HUNK_SCOPED_MAX_LINES, hunkScopedProcessAST } from "./gap-isolation";
 import { djb2 } from "./highlight-worker-shared";
 import {
@@ -133,6 +134,7 @@ import {
 } from "./hljs-gap-isolation";
 import { installPatchedJsGrammars } from "./hljs-ts-no-jsx";
 import { ImageDiff, ImagePanes, type ImageRevs, imageMime } from "./ImageDiff";
+import { useLineComposerOpen } from "./line-composer-store";
 import {
   canPreviewMarkdown,
   type MarkdownDiffView,
@@ -258,6 +260,7 @@ export interface DiffContentRevs {
 interface DiffFileContent {
   old: string | null;
   new: string | null;
+  versions?: DiffFileVersions;
 }
 
 /** `\n`-split segments in a string, allocation-free. A final newline's empty
@@ -1176,6 +1179,7 @@ function RenderedDiff({
 }) {
   const settings = useSettings();
   const isDark = useIsDark();
+  const composerHeld = useLineComposerOpen();
   // The narrow-pane override renders unified without ever writing the setting,
   // so widening the pane restores the user's split preference on its own.
   const viewMode = forceUnified
@@ -1230,7 +1234,7 @@ function RenderedDiff({
   );
   // A queued deferred read can reach this renderer after the caller has already
   // retained its new prop. Hold it here too before it can replace a live editor.
-  const paintedContext = useRetained(providedContext, !lineComposerOpen());
+  const paintedContext = useRetained(providedContext, !composerHeld);
   const deferredFileContent =
     paintedContext.path === deferredPath && paintedContext.text === deferredText
       ? paintedContext.content
@@ -1376,6 +1380,7 @@ function RenderedDiff({
       oldPath: deferredSource.oldFilePath,
       headSha:
         deferredFileContent === undefined ? undefined : paintedContext.headSha,
+      versions: deferredFileContent?.versions,
     }),
     [
       builtDiffFile,
@@ -1781,6 +1786,18 @@ function RenderedDiff({
       data-diff-file-path={paintedModel.path}
       data-diff-old-file-path={paintedModel.oldPath}
       data-diff-head-sha={paintedModel.headSha}
+      data-diff-before-path={
+        paintedModel.versions?.before
+          ? (paintedModel.versions.before.path ?? "")
+          : undefined
+      }
+      data-diff-before-revision={paintedModel.versions?.before?.revision}
+      data-diff-after-path={
+        paintedModel.versions?.after
+          ? (paintedModel.versions.after.path ?? "")
+          : undefined
+      }
+      data-diff-after-revision={paintedModel.versions?.after?.revision}
       tabIndex={-1}
       className="outline-none"
     >

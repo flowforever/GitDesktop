@@ -1,4 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
+import type { RemoteLens } from "@/lib/git/types/remote-lens";
 import type {
   AgentRunDefaults,
   AppSettings,
@@ -6,6 +7,7 @@ import type {
 } from "@/lib/settings/api";
 import { healAgentRunDefaults } from "@/lib/settings/heal";
 import { invoke } from "@/lib/tauri/invoke";
+import type { AgentPermissionMode } from "./agent-permissions";
 import { type ChannelGate, createChannelGate } from "./stream-settle";
 import type { AiProviderId } from "./types";
 
@@ -336,6 +338,8 @@ export interface AgentSessionArgs {
   /** Read-only mode (a Plan conversation): swaps each CLI's write toolset for its
    *  read-only one, so the resumable turn can explore but never write. */
   readOnly: boolean;
+  /** Explicit native harness permission profile; omitted preserves legacy flags. */
+  permissionMode?: AgentPermissionMode;
   /** Web-enabled read-only profile (a Research conversation): each CLI gains its native web
    *  tools (Claude WebSearch/WebFetch, Codex live web_search, Copilot web_fetch, opencode a
    *  generated read-only-web agent), so the turn can investigate the web while still never
@@ -354,6 +358,9 @@ export interface AgentSessionArgs {
    *  Honored for host Claude/Copilot/opencode and container Codex sessions (see
    *  `mcpSupportedFor`); other combinations omit it. */
   mcpServers?: McpServer[];
+  /** Mount GitDesktop's read-only query tools for this host session. */
+  mcpSelf?: boolean;
+  mcpSelfRemote?: RemoteLens;
   onEvent: (event: ReviewEvent) => void;
 }
 
@@ -394,10 +401,13 @@ export async function runAgentSession(
     resume: args.resume,
     fork: args.fork ?? false,
     readOnly: args.readOnly,
+    permissionMode: args.permissionMode,
     web: args.web ?? false,
     isolation: args.isolation,
     nativeSessionId: args.nativeSessionId,
     mcpServers: args.mcpServers,
+    mcpSelf: Boolean(args.mcpSelf),
+    mcpSelfRemote: args.mcpSelfRemote,
     onEvent: channel,
   });
   await gate.finish(returned);

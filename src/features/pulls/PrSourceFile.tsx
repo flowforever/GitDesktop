@@ -32,6 +32,7 @@ import type { RemoteLens } from "@/lib/git/types";
 import { isAppError } from "@/lib/tauri/invoke";
 import { useIsDark } from "@/lib/use-is-dark";
 import { PrCodeImportLinks } from "./PrCodeImportLinks";
+import { PrFileContextMarker } from "./PrFileContextMarker";
 
 const PrSourceEditor = lazy(() => import("./PrSourceEditor"));
 const MAX_SOURCE_BYTES = 20_000_000;
@@ -178,7 +179,6 @@ export function PrSourceFile({
       <SourceBody
         key={JSON.stringify([repoPath, headSha, path])}
         path={path}
-        headSha={headSha}
         content={content}
         importLinks={onOpenImport !== undefined}
       />
@@ -226,19 +226,36 @@ export function PrSourceFile({
         onRetry={failed ? () => void read.refetch() : undefined}
         className="border-b px-3 py-1.5"
       />
-      <div className="min-h-0 flex-1">{body}</div>
+      <PrFileContextMarker
+        className="min-h-0 flex-1"
+        path={path}
+        headSha={headSha}
+        source
+        pending={
+          !hasHead ||
+          read.isPlaceholderData ||
+          (pane !== "content" && pane !== "content-degraded")
+        }
+        versions={{
+          before: null,
+          after: {
+            path: content.kind === "absent" ? null : path,
+            revision: headSha,
+          },
+        }}
+      >
+        {body}
+      </PrFileContextMarker>
     </section>
   );
 }
 
 function SourceBody({
   path,
-  headSha,
   content,
   importLinks,
 }: {
   path: string;
-  headSha: string;
   content: SourceContent;
   importLinks: boolean;
 }) {
@@ -257,12 +274,7 @@ function SourceBody({
       return <SourceImage path={path} src={content.src} />;
     case "text":
       return (
-        <div
-          className="h-full"
-          data-diff-file-path={path}
-          data-diff-head-sha={headSha}
-          data-diff-content-side="new"
-        >
+        <div className="h-full">
           {content.large ? (
             <LargeSource
               path={path}
