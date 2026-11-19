@@ -128,21 +128,7 @@ stage=start-loopback-feed
 printf '%s\n' 'START: start and probe loopback HTTPS feed'
 node .github/scripts/preview-windows-fixture-feed.mjs "$GD_WIN_FIXTURE_DIR" >"$dir/feed.log" 2>&1 &
 server=$!
-ready=false
-ca_file=$(cygpath -m "$dir/ca.pem")
-for _ in {1..50}; do
-  if curl --silent --show-error --fail --max-time 1 --noproxy '*' --cacert "$ca_file" \
-    https://127.0.0.1:18474/health >/dev/null 2>"$dir/health.log"; then
-    ready=true
-    break
-  fi
-  sleep 0.2
-done
-if [ "$ready" != true ]; then
-  cat "$dir/health.log" >&2
-  printf '%s\n' 'Loopback health did not pass certificate-validated HTTPS.' >&2
-  exit 1
-fi
+node .github/scripts/probe-preview-windows-https.mjs "$GD_WIN_TEST_CA"
 printf '%s\n' 'PASS: loopback HTTPS feed ready'
 stage=supervise-native-install
 pwsh -NoProfile -File .github/scripts/supervise-preview-windows-nsis.ps1
