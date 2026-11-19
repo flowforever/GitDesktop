@@ -9,20 +9,50 @@ if (!$fixture.StartsWith($runnerTemp + [IO.Path]::DirectorySeparatorChar, [Strin
     throw 'Fixture must be below the dedicated runner temporary directory.'
 }
 $install = Join-Path $fixture 'installed'
-$exe = Join-Path $install 'gitdesktop.exe'
+$nameA = (Get-Content -Raw (Join-Path $fixture 'a/app.name')).Trim()
+$nameB = (Get-Content -Raw (Join-Path $fixture 'b/app.name')).Trim()
+if ($nameA -notmatch '^[\w][\w. -]*\.exe$' -or $nameA -cne $nameB) {
+    throw 'The rendered A and B installers do not agree on their executable name.'
+}
+$exe = Join-Path $install $nameA
 $hashA = (Get-Content -Raw (Join-Path $fixture 'a/app.sha256')).Trim()
 $hashB = (Get-Content -Raw (Join-Path $fixture 'b/app.sha256')).Trim()
 if ($hashA -eq $hashB) { throw 'A and B executables unexpectedly have identical hashes.' }
 
 Write-Host 'START: isolated, per-user installation of A'
-$seed = Start-Process -FilePath (Join-Path $fixture 'a/setup.exe') -ArgumentList @('/S', "/D=$install") -WindowStyle Hidden -PassThru
-if (!$seed.WaitForExit(120000)) {
-    Stop-Process -Id $seed.Id -Force -ErrorAction SilentlyContinue
-    throw 'A installer did not finish.'
+$start = [Diagnostics.ProcessStartInfo]::new()
+$start.FileName = Join-Path $fixture 'a/setup.exe'
+$start.WorkingDirectory = $fixture
+$start.UseShellExecute = $false
+# NSIS /D must be the final argument and must not be quoted, even if
+# its value contains spaces. Do not let PowerShell rejoin or re-quote it.
+$start.Arguments = "/S /D=$install"
+$seed = [Diagnostics.Process]::new()
+$seed.StartInfo = $start
+try {
+    if (!$seed.Start()) { throw 'Unable to start the A installer.' }
+    Write-Host "Seed installer PID: $($seed.Id); expected path: $exe"
+    if (!$seed.WaitForExit(120000)) {
+        $seed.Kill($true)
+        throw 'A installer did not finish within 120 seconds.'
+    }
+    $seedExit = $seed.ExitCode
+} finally {
+    $seed.Dispose()
 }
-if ($seed.ExitCode -ne 0 -or !(Test-Path -LiteralPath $exe) -or
-    (Get-FileHash -LiteralPath $exe).Hash -ne $hashA) {
-    throw 'App A did not install at the isolated path with the expected hash.'
+$installedExists = Test-Path -LiteralPath $exe -PathType Leaf
+Write-Host "Seed installer exit: $seedExit; expected executable exists: $installedExists"
+if ($seedExit -ne 0 -or !$installedExists) {
+    if (Test-Path -LiteralPath $install -PathType Container) {
+        $files = @(Get-ChildItem -LiteralPath $install -File -Force | Select-Object -First 20 -ExpandProperty Name)
+        Write-Host "Files at the isolated install path (first 20): $($files -join ', ')"
+    }
+    if ($seedExit -ne 0) { throw "A installer returned exit code $seedExit." }
+    throw "A installer returned success but did not create $exe."
+}
+$installedHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+if ($installedHash -ne $hashA) {
+    throw "A executable hash differs from the rendered NSIS payload. Expected $hashA; got $installedHash."
 }
 if ((Get-Content -Raw (Join-Path $fixture 'downloads')).Trim() -ne '0') {
     throw 'B downloaded before the fixture allowed installation.'

@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+
+const [targetArg, output] = process.argv.slice(2);
+assert.ok(targetArg && output, "expected the build output and fixture record directories");
+const target = resolve(targetArg);
+const script = readFileSync(join(target, "nsis", "x64", "installer.nsi"), "utf8");
+const main = /^!define MAINBINARYNAME "([^"\r\n]+)"\r?$/m.exec(script)?.[1];
+const sourceArg = /^!define MAINBINARYSRCPATH "([^"\r\n]+)"\r?$/m.exec(script)?.[1];
+assert.ok(main && sourceArg, "the rendered Tauri NSIS script must declare its main payload");
+const name = `${main}.exe`;
+assert.match(name, /^[\w][\w. -]*\.exe$/i, "invalid installed executable name");
+const source = resolve(sourceArg);
+assert.equal(dirname(source).toLowerCase(), target.toLowerCase(), "expected payload in this build's target directory");
+assert.equal(basename(source).toLowerCase(), name.toLowerCase(), "NSIS File source and binary name disagree");
+const hash = createHash("sha256").update(readFileSync(source)).digest("hex");
+writeFileSync(join(output, "app.name"), `${name}\n`);
+writeFileSync(join(output, "app.sha256"), `${hash}\n`);
+console.log(`Rendered NSIS main payload: ${name} (SHA-256 ${hash})`);

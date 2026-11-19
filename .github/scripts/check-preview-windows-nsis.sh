@@ -75,7 +75,7 @@ JS
   test -s "${bundles[0]}.sig"
   mv "${bundles[0]}" "$output/setup.exe"
   mv "${bundles[0]}.sig" "$output/setup.exe.sig"
-  sha256sum "$target/gitdesktop.exe" | cut -d' ' -f1 >"$output/app.sha256"
+  node .github/scripts/record-preview-windows-payload.mjs "$target" "$win_output"
   printf 'PASS: collected installer, signature and executable hash for %s\n' "$slot"
 }
 build a 1
