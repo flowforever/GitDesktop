@@ -125,8 +125,23 @@ does not apply to Windows platform trust; this workflow does not claim
 either native upgrade has passed. A separate macOS Actions job builds and
 checks a real disposable DMG, verifies tamper and signed-version rejection
 without Apple credentials, and compiles/tests the native URL allowlist.
-That is not a Finder installation test. Windows staging uses updater
-signatures, not Authenticode; evaluate SmartScreen separately.
+The macOS job also serves the ephemeral fixture over loopback HTTPS and
+runs the production DMG preparation code with an isolated test client
+trusting only the fixture CA. It rejects default-system-trust, forged
+versions and tampered download bytes, and confirms the valid downloaded
+DMG is quarantined and mounts read-only via `hdiutil`. There is no test
+switch or fixture CA in shipped builds, and no system trust change.
+This is not a Finder installation or Gatekeeper approval test.
+
+For a future native Windows CI gate, use a separate test-only Tauri
+executable and client-local fixture CA, two NSIS installers for a
+disposable bundle ID, and a supervisor on a fresh Windows runner. Install
+A under the test account; verify A before permitting the signed B
+download. Invoke the native updater in the supervised child (it starts
+NSIS and exits), then verify the installed file version/hash, launch B,
+and confirm no repeated update. Until that is implemented and passes,
+perform the Windows staging acceptance on a test machine. Updater
+signatures are not Authenticode; evaluate SmartScreen separately.
 
 Production creates a new `preview-<version>` **prerelease** with immutable
 by-policy asset names and SHA-256 checks; existing published versioned assets

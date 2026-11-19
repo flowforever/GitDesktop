@@ -25,9 +25,9 @@ mod macos {
         process::Command,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
-    use tauri::Url;
+    use tauri::{AppHandle, Runtime, Url};
     use tauri_plugin_opener::OpenerExt;
-    use tauri_plugin_updater::UpdaterExt;
+    use tauri_plugin_updater::{UpdaterBuilder, UpdaterExt};
 
     const PRODUCTION: &str = "com.thebguy.gitdesktop.preview";
     const STAGING: &str = "com.thebguy.gitdesktop.preview.staging";
@@ -54,6 +54,26 @@ mod macos {
     }
 
     pub(super) async fn download_and_open(app: tauri::AppHandle, version: &str) -> Result<(), String> {
+        let builder = app
+            .updater_builder()
+            .timeout(Duration::from_secs(120))
+            // GitHub redirects release assets to its CDN. Require HTTPS
+            // across redirects as well as for the original URL.
+            .configure_client(|client| client.https_only(true));
+        let disk_image = prepare_disk_image(&app, builder, version).await?;
+        app.opener()
+            .open_path(disk_image.path().to_string_lossy().into_owned(), None::<&str>)
+            .map_err(|e| e.to_string())?;
+        // Launch Services and Finder use the file after the command returns.
+        disk_image.keep().map_err(|e| e.error.to_string())?;
+        Ok(())
+    }
+
+    async fn prepare_disk_image<R: Runtime>(
+        app: &AppHandle<R>,
+        builder: UpdaterBuilder,
+        version: &str,
+    ) -> Result<tempfile::NamedTempFile, String> {
         let config = app.config();
         if config.identifier != PRODUCTION && config.identifier != STAGING {
             return Err("Only GitDesktop Preview can open this update.".into());
@@ -70,12 +90,7 @@ mod macos {
             .get(0)
             .and_then(|value| value.as_str())
             .ok_or("Preview update endpoint is missing.")?;
-        let update = app
-            .updater_builder()
-            .timeout(Duration::from_secs(120))
-            // GitHub redirects release assets to its CDN. Require HTTPS
-            // across redirects as well as for the original URL.
-            .configure_client(|client| client.https_only(true))
+        let update = builder
             .build()
             .map_err(|e| e.to_string())?
             .check()
@@ -111,18 +126,89 @@ mod macos {
         if !status.success() {
             return Err("Could not mark the downloaded disk image for normal macOS checks.".into());
         }
-        app.opener()
-            .open_path(path.to_string_lossy().into_owned(), None::<&str>)
-            .map_err(|e| e.to_string())?;
-        // Launch Services and Finder use the file after the command returns.
-        // Keep it in the OS temporary directory for this user to finish.
-        disk_image.keep().map_err(|e| e.error.to_string())?;
-        Ok(())
+        Ok(disk_image)
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[tokio::test]
+        #[ignore = "requires disposable signed DMG, key and local HTTPS fixture from Actions"]
+        async fn downloads_and_quarantines_signed_dmg() {
+            let env = |name| std::env::var(name).expect(name);
+            let feed = env("GD_DMG_TEST_FEED");
+            let expected = std::fs::read(env("GD_DMG_TEST_PAYLOAD")).unwrap();
+            let cert = reqwest::Certificate::from_pem(
+                &std::fs::read(env("GD_DMG_TEST_CERT")).unwrap(),
+            ).unwrap();
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.config_mut().identifier = STAGING.into();
+            context.config_mut().version = Some("2.0.0".into());
+            context.package_info_mut().version = "2.0.0".parse().unwrap();
+            context.config_mut().plugins.0.insert(
+                "updater".to_string(),
+                serde_json::json!({
+                    "endpoints": [&feed],
+                    "pubkey": env("GITDESKTOP_PREVIEW_UPDATER_PUBKEY"),
+                    "requireSignedVersion": true,
+                }),
+            );
+            let app = tauri::test::mock_builder()
+                .plugin(tauri_plugin_updater::Builder::new().build())
+                .build(context)
+                .unwrap();
+            let builder = || app.handle().updater_builder().timeout(Duration::from_secs(10));
+            let local_builder = |client: UpdaterBuilder| {
+                let root = cert.clone();
+                client.configure_client(move |client| {
+                    client.https_only(true).tls_certs_only([root.clone()])
+                })
+            };
+            // Normal system trust must reject the disposable CA. Only the
+            // test client adds it; this configuration is not shipped.
+            let result = prepare_disk_image(app.handle(), builder(), "2.0.1").await;
+            assert!(result.is_err());
+            let mismatch = prepare_disk_image(app.handle(), local_builder(builder()), "2.0.2").await;
+            assert!(mismatch.is_err());
+            let mut tampered_url = Url::parse(&feed).unwrap();
+            tampered_url.set_path("/tampered.json");
+            let tampered_builder = local_builder(builder().endpoints(vec![tampered_url]).unwrap());
+            assert!(prepare_disk_image(app.handle(), tampered_builder, "2.0.1").await.is_err());
+            let completed = prepare_disk_image(app.handle(), local_builder(builder()), "2.0.1")
+                .await
+                .expect("native signed HTTPS DMG preparation");
+            assert_eq!(std::fs::read(completed.path()).unwrap(), expected);
+            let quarantine = Command::new("/usr/bin/xattr")
+                .args(["-p", "com.apple.quarantine"])
+                .arg(completed.path())
+                .output()
+                .unwrap();
+            assert!(quarantine.status.success());
+            assert!(String::from_utf8(quarantine.stdout).unwrap().contains("GitDesktop Preview"));
+            assert!(Command::new("/usr/bin/hdiutil")
+                .arg("verify")
+                .arg(completed.path())
+                .status()
+                .unwrap()
+                .success());
+            let mount = tempfile::tempdir().unwrap();
+            let attach = Command::new("/usr/bin/hdiutil")
+                .args(["attach", "-readonly", "-nobrowse", "-mountpoint"])
+                .arg(mount.path())
+                .arg(completed.path())
+                .status()
+                .unwrap();
+            assert!(attach.success(), "signed and quarantined fixture DMG should mount normally");
+            let marker = std::fs::read_to_string(mount.path().join("README.txt"));
+            let detach = Command::new("/usr/bin/hdiutil")
+                .arg("detach")
+                .arg(mount.path())
+                .status()
+                .unwrap();
+            assert!(detach.success());
+            assert!(marker.unwrap().contains("Synthetic preview fixture"));
+        }
 
         #[test]
         fn production_requires_exact_versioned_repo_and_dmg() {
