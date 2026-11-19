@@ -45,6 +45,14 @@ jobs:
           workspaces: "./src-tauri -> target"
           save-if: false
       - run: pnpm install --frozen-lockfile
-      - name: Verify real signed NSIS A to B replacement and relaunch
+      - name: Build signed fixtures and hand off A-to-B installation
         shell: bash
         run: bash .github/scripts/check-preview-windows-nsis.sh
+      - name: Independently verify exact B replacement and visible window
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: .github/scripts/verify-preview-windows-nsis.ps1
+      - name: Clean up isolated native updater fixture
+        if: ${{ always() && env.GD_WIN_FIXTURE_DIR != '' }}
+        shell: pwsh
+        run: .github/scripts/verify-preview-windows-nsis.ps1 -Cleanup

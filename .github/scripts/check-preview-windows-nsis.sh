@@ -11,13 +11,15 @@ test "${RUNNER_OS:-}" = Windows
 umask 077
 dir=$(mktemp -d "$(cygpath -u "$RUNNER_TEMP")/gd-win.XXXXXX")
 export GD_WIN_FIXTURE_DIR="$(cygpath -w "$dir")"
+# The follow-up step runs in a clean shell with the same disposable runner disk.
+printf 'GD_WIN_FIXTURE_DIR=%s\n' "$GD_WIN_FIXTURE_DIR" >> "$(cygpath -u "$GITHUB_ENV")"
 export NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost
-verified=false
+handoff=false
 cleanup() {
   code=$?
   trap - EXIT
-  if [ "$code" -eq 0 ] && [ "$verified" != true ]; then
-    printf 'Native Windows acceptance did not reach the final A→B verification.\n' >&2
+  if [ "$code" -eq 0 ] && [ "$handoff" != true ]; then
+    printf 'Native Windows acceptance did not complete installer handoff.\n' >&2
     code=1
   fi
   if [ -n "${server:-}" ]; then
@@ -27,7 +29,7 @@ cleanup() {
   if [ "$code" -ne 0 ] && [ -f "$dir/feed.log" ]; then
     cat "$dir/feed.log"
   fi
-  rm -rf -- "$dir" || echo "Runner temp cleanup incomplete; the disposable VM will be removed." >&2
+  rm -f -- "$dir/preview.key" "$dir/ca.key" "$dir/leaf.key"
   exit "$code"
 }
 trap cleanup EXIT
@@ -137,13 +139,11 @@ node .github/scripts/probe-preview-windows-https.mjs "$GD_WIN_TEST_CA"
 printf '%s\n' 'PASS: loopback HTTPS feed ready'
 stage=supervise-native-install
 pwsh -NoProfile -File .github/scripts/supervise-preview-windows-nsis.ps1
-stage=verify-native-completion
-# A child exit of zero (including Tauri's deliberate process::exit(0))
-# is not the acceptance result. This directory is fresh for this attempt.
-if [ ! -f "$dir/native-update-verified" ] ||
-   [ "$(cat "$dir/native-update-verified")" != "$(cat "$dir/b/app.sha256")" ]; then
-  printf 'Missing or incorrect verification marker for the relaunched B payload.\n' >&2
+stage=verify-installer-handoff
+if [ ! -f "$dir/native-handoff-completed" ] ||
+   [ "$(cat "$dir/native-handoff-completed")" != "$(cat "$dir/b/app.sha256")" ]; then
+  printf 'Missing or incorrect native installer handoff marker.\n' >&2
   exit 1
 fi
-verified=true
-printf 'PASS: Windows A→B replacement and relaunch independently confirmed\n'
+handoff=true
+printf 'PASS: signed Tauri updater handed off to native NSIS\n'

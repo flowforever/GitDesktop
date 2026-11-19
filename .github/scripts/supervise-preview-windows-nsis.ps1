@@ -1,23 +1,7 @@
 $ErrorActionPreference = 'Stop'
-if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted') {
-    throw 'The native installation test is limited to a disposable GitHub-hosted runner.'
-}
-$fixture = [IO.Path]::GetFullPath($env:GD_WIN_FIXTURE_DIR)
-$runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([IO.Path]::DirectorySeparatorChar)
-if (!$fixture.StartsWith($runnerTemp + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
-    !(Split-Path $fixture -Leaf).StartsWith('gd-win.')) {
-    throw 'Fixture must be below the dedicated runner temporary directory.'
-}
-$install = Join-Path $fixture 'installed'
-$nameA = (Get-Content -Raw (Join-Path $fixture 'a/app.name')).Trim()
-$nameB = (Get-Content -Raw (Join-Path $fixture 'b/app.name')).Trim()
-if ($nameA -notmatch '^[\w][\w. -]*\.exe$' -or $nameA -cne $nameB) {
-    throw 'The rendered A and B installers do not agree on their executable name.'
-}
-$exe = Join-Path $install $nameA
-$hashA = (Get-Content -Raw (Join-Path $fixture 'a/app.sha256')).Trim()
-$hashB = (Get-Content -Raw (Join-Path $fixture 'b/app.sha256')).Trim()
-if ($hashA -eq $hashB) { throw 'A and B executables unexpectedly have identical hashes.' }
+. (Join-Path $PSScriptRoot 'preview-windows-nsis-common.ps1')
+$fixture = Get-FixturePath
+$install, $exe, $hashA, $hashB = Get-FixturePayload $fixture
 
 Write-Host 'START: isolated, per-user installation of A'
 $start = [Diagnostics.ProcessStartInfo]::new()
@@ -89,40 +73,7 @@ if (!(Test-Path -LiteralPath (Join-Path $fixture 'native-update-invoked')) -or
     throw 'The native updater driver did not reach native installation.'
 }
 
-$deadline = [DateTime]::UtcNow.AddSeconds(120)
-$updated = $false
-while ([DateTime]::UtcNow -lt $deadline) {
-    if (Test-Path -LiteralPath $exe) {
-        try {
-            if ((Get-FileHash -LiteralPath $exe).Hash -eq $hashB) {
-                $updated = $true
-                break
-            }
-        } catch {
-            # The installer may briefly hold the old file open.
-        }
-    }
-    Start-Sleep -Milliseconds 500
-}
-if (!$updated) { throw 'Native installer did not replace the isolated file with the embedded B payload.' }
 if ((Get-Content -Raw (Join-Path $fixture 'downloads')).Trim() -ne '1') {
-    throw 'Expected exactly one signed B download.'
+    throw 'Expected exactly one signed B download before installer handoff.'
 }
-Write-Host 'PASS: native NSIS replaced A with the exact embedded B executable (1.1.1)'
-
-Write-Host 'START: launch the installed B executable'
-$launched = Start-Process -FilePath $exe -PassThru
-try {
-    $deadline = [DateTime]::UtcNow.AddSeconds(35)
-    do {
-        Start-Sleep -Milliseconds 500
-        $launched.Refresh()
-        if ($launched.HasExited) { throw "Installed B quit early: $($launched.ExitCode)" }
-    } until ($launched.MainWindowHandle -ne [IntPtr]::Zero -or [DateTime]::UtcNow -gt $deadline)
-    if ($launched.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Installed B did not create its window.' }
-    if ((Get-FileHash -LiteralPath $launched.Path).Hash -ne $hashB) { throw 'The launched executable was not B.' }
-    Write-Host 'PASS: the installed B binary relaunched and opened a window'
-} finally {
-    Stop-Process -Id $launched.Id -Force -ErrorAction SilentlyContinue
-}
-[IO.File]::WriteAllText((Join-Path $fixture 'native-update-verified'), $hashB)
+[IO.File]::WriteAllText((Join-Path $fixture 'native-handoff-completed'), $hashB)
