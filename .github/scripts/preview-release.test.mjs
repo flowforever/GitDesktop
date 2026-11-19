@@ -27,6 +27,9 @@ test("manifest contains official installer-qualified keys and immutable URLs", (
     assert.equal(part.signature, fakeSignature);
   }
   assert.deepEqual(m.platforms["darwin-aarch64-app"], m.platforms["darwin-x86_64-app"]);
+  assert.match(m.platforms["darwin-aarch64-app"].url, /universal\.dmg$/);
+  assert.match(m.platforms["windows-x86_64-nsis"].url, /\.exe$/);
+  assert.match(m.platforms["linux-x86_64-appimage"].url, /\.AppImage$/);
   assert.throws(() => manifestFor("2.0.1", { ...signatures, linux: "junk" }, m.pub_date));
   assert.throws(() => manifestFor("2.0.1", { linux: fakeSignature }, m.pub_date));
   assert.throws(() => manifestFor("2.0.1", signatures, "yesterday"));

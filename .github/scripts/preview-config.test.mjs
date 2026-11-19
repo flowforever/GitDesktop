@@ -77,10 +77,14 @@ test("production and staging require distinct secure update channels", () => {
     GITDESKTOP_PREVIEW_UPDATER_PUBKEY: testKey,
   });
   assert.equal(production.status, 0);
-  assert.equal(production.config.bundle.createUpdaterArtifacts, true);
-  assert.equal(production.config.bundle.macOS.signingIdentity, undefined);
+  assert.equal(production.config.bundle.createUpdaterArtifacts, false);
+  assert.equal(production.config.bundle.macOS.signingIdentity, "-");
   assert.equal(production.config.plugins.updater.requireSignedVersion, true);
   assert.equal(production.config.plugins.updater.pubkey, testKey);
+  assert.equal(run("Windows", 1, 1, {
+    GITDESKTOP_PREVIEW_SIGNING_CHANNEL: "production",
+    GITDESKTOP_PREVIEW_UPDATER_PUBKEY: testKey,
+  }).config.bundle.createUpdaterArtifacts, true);
   const productionURL = production.config.plugins.updater.endpoints[0];
 
   const staging = (endpoint) => run("Linux", 1, 1, {

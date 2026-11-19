@@ -31,6 +31,7 @@ mod mcp_server;
 mod nav_guard;
 mod oplog;
 mod path_launcher;
+mod preview_update;
 mod pty;
 mod research;
 mod review_notes;
@@ -163,6 +164,7 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(store_lock_commands::StoreLockState::default())
         .invoke_handler(tauri::generate_handler![
+            preview_update::preview_open_signed_dmg,
             git::repo::check_git_installed,
             git::repo::validate_repo,
             git::repo::path_is_dir,

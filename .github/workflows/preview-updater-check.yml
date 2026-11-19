@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/PREVIEW-UPDATES.md"
       - ".github/scripts/check-preview-signature.sh"
+      - ".github/scripts/check-preview-macos-dmg.sh"
       - ".github/scripts/preview-config*.mjs"
       - ".github/scripts/preview-release*.mjs"
       - ".github/workflows/signed-preview.yml"
@@ -17,6 +18,8 @@ on:
       - "src/test/preview-update.test.tsx"
       - "src/test/app-update-removal.test.tsx"
       - "src-tauri/tauri.conf.json"
+      - "src-tauri/src/preview_update.rs"
+      - "src-tauri/src/lib.rs"
       - "src-tauri/capabilities/**"
       - "src-tauri/Cargo.lock"
       - ".node-version"
@@ -49,3 +52,29 @@ jobs:
         run: pnpm exec vitest run src/test/preview-update.test.tsx src/test/app-update-removal.test.tsx
       - name: Verify genuine Tauri signatures with a disposable key
         run: bash .github/scripts/check-preview-signature.sh
+
+  signed-macos-dmg-fixture:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6.1.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          save-if: false
+      - run: pnpm install --frozen-lockfile
+      - name: Verify a real DMG with an ephemeral key, no Apple account
+        run: bash .github/scripts/check-preview-macos-dmg.sh
+      - name: Compile and test the native DMG URL allowlist
+        run: |
+          mkdir -p dist
+          printf '<!doctype html><title>Native unit tests</title>' > dist/index.html
+          cargo test --locked --manifest-path src-tauri/Cargo.toml preview_update::macos::tests

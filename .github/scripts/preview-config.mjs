@@ -73,11 +73,12 @@ const config = {
   identifier: channel === "staging" ? "com.thebguy.gitdesktop.preview.staging" : "com.thebguy.gitdesktop.preview",
   version,
   bundle: {
-    createUpdaterArtifacts: signed,
+    // macOS opens a separately signed DMG instead of replacing the .app.
+    createUpdaterArtifacts: signed && !macOS,
     ...(macOS ? {
       macOS: {
         bundleVersion: version,
-        ...(!signed ? { signingIdentity: "-" } : {}),
+        signingIdentity: "-",
       },
     } : {}),
   },

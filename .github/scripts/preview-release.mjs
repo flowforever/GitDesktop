@@ -26,10 +26,8 @@ const slots = {
   },
   macos: {
     os: "macOS",
-    bundle: "src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz",
-    dmg: "src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg",
-    updater: "GitDesktop-Preview-macos-universal.app.tar.gz",
-    installer: "GitDesktop-Preview-macos-universal.dmg",
+    bundle: "src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg",
+    updater: "GitDesktop-Preview-macos-universal.dmg",
     keys: ["darwin-aarch64", "darwin-aarch64-app", "darwin-x86_64", "darwin-x86_64-app"],
   },
 };
@@ -65,7 +63,7 @@ export function manifestFor(version, signatures, date) {
       url: `${downloads}/preview-${version}/${slot.updater}`,
     };
     // Tauri 2.14.1's updater looks up OS-arch-installer first, then OS-arch.
-    // Both macOS architectures use one universal, signed .app.tar.gz.
+    // Both macOS architectures use one universal, version-signed DMG.
     for (const key of slot.keys) platforms[key] = value;
   }
   return { version, notes: "New signed GitDesktop Preview build.", pub_date: date, platforms };
@@ -99,7 +97,6 @@ function collect(name) {
   const payload = uniqueBundle(slot.bundle);
   copyFileSync(payload, join(out, slot.updater));
   copyFileSync(`${payload}.sig`, join(out, `${slot.updater}.sig`));
-  if (slot.dmg) copyFileSync(uniqueBundle(slot.dmg), join(out, slot.installer));
   copyFileSync(join(tmp, "gitdesktop-preview-build.json"), join(out, "build.json"));
 }
 
@@ -122,7 +119,7 @@ function validate(input, out, channel = "production") {
   const signatures = {};
   for (const [name, dir] of Object.entries(dirs)) {
     const slot = slots[name];
-    const files = ["build.json", slot.updater, `${slot.updater}.sig`, ...(slot.installer ? [slot.installer] : [])];
+    const files = ["build.json", slot.updater, `${slot.updater}.sig`];
     assert.deepEqual(readdirSync(dir).sort(), files.sort());
     for (const file of files.filter((file) => file !== "build.json")) {
       assert.ok(statSync(join(dir, file)).size > 0);
@@ -183,7 +180,7 @@ function publish(out) {
   assert.equal(read(join(out, "latest.json")).version, version);
   const expectedFiles = [
     "latest.json", ...Object.values(slots).flatMap((slot) =>
-      [slot.updater, `${slot.updater}.sig`, ...(slot.installer ? [slot.installer] : [])]),
+      [slot.updater, `${slot.updater}.sig`]),
   ];
   assert.deepEqual(Object.keys(files).sort(), expectedFiles.sort());
   for (const [name, digest] of Object.entries(files)) assert.equal(sha(join(out, name)), digest);

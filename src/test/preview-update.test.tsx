@@ -4,18 +4,26 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PreviewUpdateNotice } from "@/features/updates/PreviewUpdateNotice";
 
-const { check, getIdentifier, isTauri } = vi.hoisted(() => ({
+const { check, getIdentifier, invoke, isTauri, platform } = vi.hoisted(() => ({
   check: vi.fn(),
   getIdentifier: vi.fn(),
   isTauri: vi.fn(),
+  invoke: vi.fn(),
+  platform: { isMac: false },
 }));
 vi.mock("@tauri-apps/api/app", () => ({ getIdentifier }));
-vi.mock("@tauri-apps/api/core", () => ({ isTauri }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke, isTauri }));
+vi.mock("@/lib/hotkeys/binding", () => ({
+  get isMac() {
+    return platform.isMac;
+  },
+}));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check }));
 
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+  platform.isMac = false;
   getIdentifier.mockResolvedValue("com.thebguy.gitdesktop.preview");
 });
 
@@ -41,6 +49,30 @@ describe("signed preview updates", () => {
     expect(downloadAndInstall).toHaveBeenCalledTimes(1);
     unmount();
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("opens a verified DMG on macOS only after consent, leaving installation to the user", async () => {
+    platform.isMac = true;
+    isTauri.mockReturnValue(true);
+    invoke.mockResolvedValue(undefined);
+    const downloadAndInstall = vi.fn();
+    check.mockResolvedValue({
+      version: "1.0.2",
+      downloadAndInstall,
+      close: vi.fn().mockResolvedValue(undefined),
+    });
+    render(<PreviewUpdateNotice />);
+    const open = await screen.findByRole("button", {
+      name: "Download and open disk image",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    await userEvent.setup().click(open);
+    expect(invoke).toHaveBeenCalledWith("preview_open_signed_dmg", {
+      expectedVersion: "1.0.2",
+    });
+    expect(downloadAndInstall).not.toHaveBeenCalled();
+    expect(await screen.findByText(/not Apple-notarized/)).toBeVisible();
+    expect(screen.queryByText(/Update installed/)).toBeNull();
   });
 
   it("reports installation errors and lets the user explicitly retry", async () => {

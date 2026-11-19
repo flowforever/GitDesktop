@@ -16,23 +16,22 @@ check. The stable application and its release workflow are unchanged.
    the public key in a proposed `GITDESKTOP_PREVIEW_UPDATER_PUBKEY` environment
    variable. Do not reuse the upstream stable key or expose release secrets
    to PR or fork jobs.
-2. The protected packaging jobs set
-   `VITE_GITDESKTOP_PREVIEW_UPDATES=1`, embed the preview public key and feed URL
-   in the Tauri updater config, keep `requireSignedVersion: true`, and
-   enable `bundle.createUpdaterArtifacts`. Refuse to produce a signed preview
-   with missing signing inputs. Keep the `com.thebguy.gitdesktop.preview`
-   bundle identity and embedded per-run version on every platform. Tauri
-   signs the updater payload and its version; the downloadable DMG is for
-   initial macOS installation, not the in-app update payload.
-3. The signed macOS leg uses Developer ID Application signing and Apple
-   notarization instead of the unsigned preview's ad hoc signing. Use the protected
-   environment's `APPLE_CERTIFICATE` (base64 .p12),
-   `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
-   `APPLE_PASSWORD` (app-specific password) and `APPLE_TEAM_ID`, as in the
-   stable build. Verify the installed seed and its replacement use the same
-   preview bundle ID and Developer Team. The updater signature is independent
-   of Apple signing and Windows Authenticode; without Authenticode, Windows
-   can still show an unrecognized publisher for a preview installer.
+2. The protected packaging jobs enable the startup UI, embed the preview
+   public key and feed URL, and require a version-bound signature. Windows
+   builds the signed NSIS payload and Linux the signed AppImage. The macOS
+   leg checks the universal disk image with `hdiutil verify` and signs the
+   DMG separately using `tauri signer sign --app-version`. Both macOS
+   architecture entries use the same DMG.
+3. macOS follows MDE's download-and-open flow: once the user clicks, the
+   native command rechecks the offer, validates the precise version and
+   allowed HTTPS destination, verifies the DMG bytes and signed version,
+   adds macOS quarantine metadata, and opens the DMG. The user quits
+   GitDesktop Preview and replaces it in Applications. No Apple ID,
+   Apple certificate, or notarization credentials are required for this
+   ad hoc signed build. It is not Apple-notarized and Gatekeeper may warn
+   or block the app. This flow does not skip Gatekeeper, trust a certificate,
+   or install the app on the user's behalf. Tauri updater signatures are
+   separate from Apple signing and Windows Authenticode.
 4. On approved publication, keep immutable, versioned updater payloads in
    GitHub prereleases (for example, tags `preview-<version>`, not `v*`).
    Point preview clients to one fixed HTTPS manifest, e.g.
@@ -56,7 +55,9 @@ check. The stable application and its release workflow are unchanged.
   versions. Install A manually while its feed offers A only; launch and
   confirm there is no prompt. Publish B to staging and relaunch A. Confirm the
   prompt shows B and does not start a download until the user accepts.
-- Accept, install, restart if needed, and verify the running app reports B.
+- Accept and verify the running app reports B after installation and restart.
+  On macOS first confirm only the signed DMG opens and A remains installed
+  until the user finishes replacing it, with normal Gatekeeper behavior.
   Launch again and confirm it no longer offers B. Test each supported
   platform/architecture, including both macOS architectures for the universal
   bundle. Verify any earlier unsigned preview requires a new signed seed and
@@ -100,7 +101,7 @@ stable `v*` releases do not read these settings.
 | --- | --- |
 | Staging (optional; keep production off) | Protect branch `ci/preview-staging`, deploy only that branch to environment `preview-staging`, and set repository variable `GITDESKTOP_PREVIEW_STAGING_ENABLED=true`. Set the environment variable `GITDESKTOP_PREVIEW_STAGING_ENDPOINT` to a distinct test HTTPS manifest URL with a normally trusted certificate. |
 | Production (after sign-off) | Protect `master`, deploy only that branch to environment `preview-release`, and set repository variable `GITDESKTOP_PREVIEW_PRODUCTION_ENABLED=true` **last**. A `master` push then publishes automatically after every signed platform succeeds. Environment protection can require review if a human release gate is desired. |
-| Both environments | Add each channel's own `GITDESKTOP_PREVIEW_UPDATER_PUBKEY` variable, `TAURI_SIGNING_PRIVATE_KEY` and, if set, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets, plus the six Apple credentials above for the protected macOS leg. Staging uses a disposable/never-production Tauri key and separate app ID. |
+| Both environments | Add each channel's own `GITDESKTOP_PREVIEW_UPDATER_PUBKEY` variable, `TAURI_SIGNING_PRIVATE_KEY` and, if set, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets, with no Apple credentials. Staging uses a disposable/never-production Tauri key and separate app ID. |
 
 Do not stage via unreviewed PR or fork code. Push the reviewed commit to the
 protected staging branch (production still off) to build A; push a second
@@ -117,14 +118,15 @@ contents of the adjacent `.sig` files in the corresponding JSON platform
 entries. The production manifest generator in `.github/scripts/preview-release.mjs`
 lists the exact platform keys; point those entries at the staging payloads,
 not production GitHub Releases. Use the B version from `build.json` and the
-same universal archive for both macOS architectures. Follow the two-version
+same version-signed universal DMG for both macOS architectures. Follow the two-version
 gate above, including the before-consent check and relaunch. Tauri has no
 official macOS desktop WebDriver, and the Linux process-local root fixture
 does not apply to Windows platform trust; this workflow does not claim
-either native upgrade has passed. macOS staging packaging verifies the
-Developer ID signature and Gatekeeper assessment. Windows staging uses
-updater signatures, not Authenticode; evaluate SmartScreen and any planned
-publisher-signing separately.
+either native upgrade has passed. A separate macOS Actions job builds and
+checks a real disposable DMG, verifies tamper and signed-version rejection
+without Apple credentials, and compiles/tests the native URL allowlist.
+That is not a Finder installation test. Windows staging uses updater
+signatures, not Authenticode; evaluate SmartScreen separately.
 
 Production creates a new `preview-<version>` **prerelease** with immutable
 by-policy asset names and SHA-256 checks; existing published versioned assets

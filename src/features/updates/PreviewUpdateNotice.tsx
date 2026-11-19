@@ -1,8 +1,9 @@
 import { getIdentifier } from "@tauri-apps/api/app";
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { isMac } from "@/lib/hotkeys/binding";
 
 type InstallState = "available" | "installing" | "installed" | "failed";
 
@@ -54,10 +55,16 @@ export function PreviewUpdateNotice() {
       // With requireSignedVersion enabled, Tauri verifies the signed bytes
       // and compares the signed version to the feed before installation.
       // Do not bypass the plugin to fetch the URL manually.
-      await update.downloadAndInstall(undefined, {
-        restartAfterInstall: false,
-        timeout: 120_000,
-      });
+      if (isMac) {
+        await invoke("preview_open_signed_dmg", {
+          expectedVersion: update.version,
+        });
+      } else {
+        await update.downloadAndInstall(undefined, {
+          restartAfterInstall: false,
+          timeout: 120_000,
+        });
+      }
       setInstallState("installed");
     } catch {
       setInstallState("failed");
@@ -74,16 +81,26 @@ export function PreviewUpdateNotice() {
     >
       <span aria-live="polite">
         {installState === "installing"
-          ? "Downloading and installing the update…"
+          ? isMac
+            ? "Downloading and verifying the disk image…"
+            : "Downloading and installing the update…"
           : installState === "installed"
-            ? "Update installed. Restart GitDesktop Preview to use it."
+            ? isMac
+              ? "Disk image opened. Quit GitDesktop Preview and replace it in Applications to finish. macOS may warn because this preview is not Apple-notarized."
+              : "Update installed. Restart GitDesktop Preview to use it."
             : installState === "failed"
-              ? "The update could not be installed. You can try again."
+              ? isMac
+                ? "The disk image could not be verified or opened. You can try again."
+                : "The update could not be installed. You can try again."
               : `GitDesktop Preview ${update.version} is available.`}
       </span>
       {(installState === "available" || installState === "failed") && (
         <Button size="sm" onClick={() => void install()}>
-          {installState === "available" ? "Download and install" : "Try again"}
+          {installState === "available"
+            ? isMac
+              ? "Download and open disk image"
+              : "Download and install"
+            : "Try again"}
         </Button>
       )}
     </section>
