@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+stage=startup
+trap 'printf "Windows updater fixture failed at stage %s (line %s, exit %s)\n" "$stage" "$LINENO" "$?" >&2' ERR
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 # Do not install packages on a self-hosted or user-owned Windows computer.
@@ -29,6 +31,8 @@ pnpm tauri signer generate --ci --password '' --write-keys "$(cygpath -w "$dir/p
 export GD_WIN_TEST_PUBLIC_KEY="$(cat "$dir/preview.key.pub")"
 build() {
   local slot=$1 run=$2
+  stage="build-$slot"
+  printf 'START: build signed fixture %s\n' "$slot"
   local target=src-tauri/target/release
   local output="$dir/$slot"
   mkdir "$output"
@@ -62,17 +66,24 @@ JS
   TAURI_SIGNING_PRIVATE_KEY="$(cat "$dir/preview.key")" \
     TAURI_SIGNING_PRIVATE_KEY_PASSWORD='' VITE_GITDESKTOP_PREVIEW_UPDATES=0 \
     pnpm tauri build --bundles nsis --config "$(cygpath -w "$output/gitdesktop-preview.json")"
+  stage="collect-$slot"
   bundles=("$target/bundle/nsis"/*.exe)
-  test "${#bundles[@]}" -eq 1
+  if [ "${#bundles[@]}" -ne 1 ]; then
+    printf 'Expected exactly one NSIS installer for %s, found %s\n' "$slot" "${#bundles[@]}" >&2
+    return 1
+  fi
   test -s "${bundles[0]}.sig"
   mv "${bundles[0]}" "$output/setup.exe"
   mv "${bundles[0]}.sig" "$output/setup.exe.sig"
   sha256sum "$target/gitdesktop.exe" | cut -d' ' -f1 >"$output/app.sha256"
+  printf 'PASS: collected installer, signature and executable hash for %s\n' "$slot"
 }
 build a 1
 build b 2
 rm -f "$dir/preview.key"
 
+stage=make-loopback-certificates
+printf '%s\n' 'START: create disposable loopback TLS certificates'
 cat > "$dir/ca.cnf" <<'CONF'
 [req]
 prompt=no
@@ -84,32 +95,54 @@ CN=GitDesktop disposable Windows fixture root
 basicConstraints=critical,CA:TRUE,pathlen:0
 keyUsage=critical,keyCertSign,cRLSign
 CONF
+cat > "$dir/leaf.cnf" <<'CONF'
+[req]
+prompt=no
+distinguished_name=dn
+[dn]
+CN=127.0.0.1
+CONF
 cat > "$dir/leaf.ext" <<'CONF'
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
 subjectAltName=IP:127.0.0.1
 CONF
-openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$dir/ca.cnf" \
-  -keyout "$dir/ca.key" -out "$dir/ca.pem" 2>/dev/null
-openssl req -new -newkey rsa:2048 -nodes -subj /CN=127.0.0.1 \
-  -keyout "$dir/leaf.key" -out "$dir/leaf.csr" 2>/dev/null
-openssl x509 -req -in "$dir/leaf.csr" -CA "$dir/ca.pem" -CAkey "$dir/ca.key" \
-  -CAcreateserial -days 1 -sha256 -extfile "$dir/leaf.ext" -out "$dir/leaf.pem" 2>/dev/null
+# OpenSSL receives only relative files and no slash-prefixed subject.
+# Git Bash/MSYS otherwise treats '/CN=...' as a Windows file argument.
+(
+  cd "$dir"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config ca.cnf \
+    -keyout ca.key -out ca.pem
+  openssl req -new -newkey rsa:2048 -nodes -config leaf.cnf \
+    -keyout leaf.key -out leaf.csr
+  openssl x509 -req -in leaf.csr -CA ca.pem -CAkey ca.key \
+    -CAcreateserial -days 1 -sha256 -extfile leaf.ext -out leaf.pem
+  openssl verify -CAfile ca.pem -verify_ip 127.0.0.1 leaf.pem
+)
+printf '%s\n' 'PASS: loopback TLS chain and IP SAN verify'
 rm -f "$dir/ca.key"
 export GD_WIN_TEST_CA="$(cygpath -w "$dir/ca.pem")"
 
+stage=start-loopback-feed
+printf '%s\n' 'START: start and probe loopback HTTPS feed'
 node .github/scripts/preview-windows-fixture-feed.mjs "$GD_WIN_FIXTURE_DIR" >"$dir/feed.log" 2>&1 &
 server=$!
 ready=false
+ca_file=$(cygpath -m "$dir/ca.pem")
 for _ in {1..50}; do
-  if curl --silent --fail --max-time 1 --noproxy '*' --cacert "$dir/ca.pem" \
-    https://127.0.0.1:18474/health >/dev/null; then
+  if curl --silent --show-error --fail --max-time 1 --noproxy '*' --cacert "$ca_file" \
+    https://127.0.0.1:18474/health >/dev/null 2>"$dir/health.log"; then
     ready=true
     break
   fi
   sleep 0.2
 done
-test "$ready" = true
-
+if [ "$ready" != true ]; then
+  cat "$dir/health.log" >&2
+  printf '%s\n' 'Loopback health did not pass certificate-validated HTTPS.' >&2
+  exit 1
+fi
+printf '%s\n' 'PASS: loopback HTTPS feed ready'
+stage=supervise-native-install
 pwsh -NoProfile -File .github/scripts/supervise-preview-windows-nsis.ps1

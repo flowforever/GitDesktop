@@ -6,6 +6,7 @@ use tauri_plugin_updater::UpdaterExt;
 
 const TEST_ID: &str = "com.thebguy.gitdesktop.preview.windowsci";
 
+#[cfg(test)]
 #[tokio::test]
 #[ignore = "requires signed disposable NSIS bundles and an isolated loopback feed"]
 async fn install_signed_nsis_fixture() {

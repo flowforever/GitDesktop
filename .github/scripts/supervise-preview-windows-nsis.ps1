@@ -32,7 +32,7 @@ Write-Host 'PASS: A matches the compiled 1.0.1 executable; B has not downloaded'
 $env:GD_WIN_INSTALLED_EXE = $exe
 $env:GD_WIN_INSTALL_DIR = $install
 Write-Host 'START: deliver signed B through native Tauri updater'
-cargo test --release --locked --manifest-path src-tauri/Cargo.toml --lib preview_update_windows_test::install_signed_nsis_fixture -- --ignored --exact
+cargo test --release --locked --manifest-path src-tauri/Cargo.toml --features windows-updater-fixture --lib preview_update_windows_test::install_signed_nsis_fixture -- --ignored --exact
 if ($LASTEXITCODE -ne 0) { throw "Native updater test child failed: $LASTEXITCODE" }
 if (!(Test-Path -LiteralPath (Join-Path $fixture 'native-update-invoked')) -or
     (Get-Content -Raw (Join-Path $fixture 'native-update-invoked')).Trim() -ne '1.1.1') {
