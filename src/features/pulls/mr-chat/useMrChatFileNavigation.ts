@@ -151,7 +151,7 @@ export function useMrChatFileNavigation(input: Navigation) {
   );
 
   const onOpenFile = useCallback(
-    async (reference: string) => {
+    async (reference: string, requestedSide?: "old" | "new") => {
       const start = live.current;
       const startKey = start && identity(start);
       if (!start || !startKey || !start.headSha || lineComposerOpen()) return;
@@ -182,6 +182,10 @@ export function useMrChatFileNavigation(input: Navigation) {
           request: {
             ...parsed,
             ...target,
+            side:
+              target.kind === "change"
+                ? (requestedSide ?? target.side)
+                : target.side,
             id: crypto.randomUUID(),
             repoPath: start.repoPath,
             lens: start.lens,
@@ -202,6 +206,13 @@ export function useMrChatFileNavigation(input: Navigation) {
       }
       if (direct.length === 1) {
         open(direct[0]);
+        return;
+      }
+      // Search results are patch anchors, never head-only source references.
+      if (requestedSide !== undefined) {
+        toast.info(
+          "This file is missing from the loaded MR file list. Reload the MR before opening this search result.",
+        );
         return;
       }
       try {

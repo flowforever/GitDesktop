@@ -469,6 +469,12 @@ in one click.
   MR's before-and-after versions. Other files stay unloaded.
   The active request prepares its selected file in the background; a loading
   notice keeps preparation visible while the partial diff remains available.
+- **Find in diffs**: Cmd/Ctrl+F searches the current file's displayed code on both
+  sides, with match highlights, counts, case sensitivity and Enter/Shift+Enter
+  navigation. Esc closes the find bar. Cmd/Ctrl+Shift+F searches added, removed
+  and context lines across the current MR's diffs; choose a result to open its
+  file and exact before/after line. Both searches are available from the command
+  palette and can have their own bindings in Settings → Keyboard.
 - **Chat while reviewing**: choose the Harness CLI in the sidebar header and
   set its model and thinking effort beside the composer. **Permissions** offers
   the selected CLI's modes, including Codex **Read-only**, **Auto** and

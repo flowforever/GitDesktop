@@ -1,0 +1,15 @@
+::highlight(gd-diff-find) {
+  background-color: color-mix(in oklab, var(--warning) 35%, transparent);
+  color: var(--foreground);
+}
+
+::highlight(gd-diff-find-current) {
+  background-color: var(--warning);
+  color: var(--background);
+}
+
+/* Also identifies the current match on WebViews without custom highlights. */
+.gd-diff-find-current {
+  outline: 2px solid var(--warning);
+  outline-offset: -2px;
+}

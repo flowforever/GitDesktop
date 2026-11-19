@@ -1,18 +1,32 @@
-import { type CSSProperties, type ReactNode, useId } from "react";
+import {
+  type CSSProperties,
+  createContext,
+  type ReactNode,
+  useContext,
+  useId,
+  useRef,
+} from "react";
 import { ResizeSeparator } from "@/components/resize-separator";
+import { DiffTextSearch } from "@/features/diff/DiffTextSearch";
 import { useDiffLayoutStore } from "@/lib/stores/diff-layout";
 import { useContainerWidth } from "@/lib/use-container-width";
 import "./diff-columns.css";
+
+const DiffSearchScope = createContext(false);
 
 /** Adjusts either library split layout without replacing its tables or widgets. */
 export function DiffColumns({
   mode,
   children,
+  searchable = false,
 }: {
   mode: "split" | "unified";
   children: ReactNode;
+  searchable?: boolean;
 }) {
   const [measureRef, width] = useContainerWidth<HTMLDivElement>();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const parentSearch = useContext(DiffSearchScope);
   const id = useId();
   const preferred = useDiffLayoutStore((s) => s.oldPanePercent);
   const setPercent = useDiffLayoutStore((s) => s.setOldPanePercent);
@@ -43,7 +57,14 @@ export function DiffColumns({
         } as CSSProperties
       }
     >
-      {children}
+      {searchable && !parentSearch && (
+        <DiffTextSearch contentRef={contentRef} />
+      )}
+      <div ref={contentRef} className="min-w-0">
+        <DiffSearchScope value={searchable || parentSearch}>
+          {children}
+        </DiffSearchScope>
+      </div>
       {mode === "split" && max > min && (
         <ResizeSeparator
           label="Resize old and new diff panes"

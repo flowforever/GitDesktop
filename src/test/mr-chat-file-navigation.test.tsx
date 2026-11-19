@@ -14,6 +14,7 @@ import {
   parseMrChatFileReference,
   useMrChatFileNavigation,
 } from "@/features/pulls/mr-chat/useMrChatFileNavigation";
+import { PrDiffSearch } from "@/features/pulls/PrDiffSearch";
 import { PrFilesPane } from "@/features/pulls/RemotePrViewParts";
 import { gitObjectsPresent } from "@/lib/git/api";
 import {
@@ -216,6 +217,28 @@ describe("MR chat file references", () => {
     );
   });
 
+  it("opens search results on their exact diff side without scanning other files", async () => {
+    const onNavigate = vi.fn();
+    const view = renderHook(
+      () => useMrChatFileNavigation({ ...SCOPE, onNavigate }),
+      { wrapper: wrapper() },
+    );
+    await act(() => view.result.current.onOpenFile("src/entry.ts:10:3", "old"));
+    expect(view.result.current.request).toMatchObject({
+      path: "src/entry.ts",
+      side: "old",
+      line: 10,
+      column: 3,
+    });
+    await act(() => view.result.current.onOpenFile("src/context.ts:1", "new"));
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(onNavigate).toHaveBeenCalledOnce();
+    expect(view.result.current.request).toBeUndefined();
+    expect(toast.info).toHaveBeenCalledWith(
+      expect.stringContaining("missing from the loaded MR file list"),
+    );
+  });
+
   it.each(["head", "MR", "activation", "file navigation", "invalid link"])(
     "discards an outstanding snapshot lookup after %s changes",
     async (change) => {
@@ -266,6 +289,24 @@ function FilesHarness() {
   });
   return (
     <>
+      <PrDiffSearch
+        sections={
+          new Map(
+            SCOPE.changedFiles.map((file) => [file.path, patch(file.path)]),
+          )
+        }
+        enabled
+        pending={false}
+        failed={false}
+        incomplete={false}
+        onRetry={() => undefined}
+        onSelect={(match) => {
+          void navigation.onOpenFile(
+            `${encodeURIComponent(match.path)}:${match.line}:${match.column}`,
+            match.side,
+          );
+        }}
+      />
       <button
         type="button"
         onClick={() => void navigation.onOpenFile("src/context.ts")}
@@ -314,6 +355,43 @@ function FilesHarness() {
 }
 
 describe("chat navigation through the shared MR file pane", () => {
+  it("opens MR search results at the old-side line and reveals their file without an AI session", async () => {
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(<FilesHarness />, { wrapper: wrapper() });
+    await screen.findByRole("group", { name: "Diff of src/entry.ts" });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Search MR changes" }),
+    );
+    await userEvent.type(
+      screen.getByRole("searchbox", { name: "Search MR changes" }),
+      "line 10",
+    );
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /src\/entry.ts.*Before line 10/,
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        scroll.mock.instances.some(
+          (element) =>
+            element instanceof Element &&
+            element.matches("tr.diff-line") &&
+            element.querySelector(
+              '[data-line-old-num="10"], .diff-line-old-num [data-line-num="10"]',
+            ),
+        ),
+      ).toBe(true),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Search MR changes" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: /entry.ts/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(snapshot).not.toHaveBeenCalled();
+  });
   it("reveals unchanged files in All files and preserves the visit in file history", async () => {
     render(<FilesHarness />, { wrapper: wrapper() });
     await userEvent.click(

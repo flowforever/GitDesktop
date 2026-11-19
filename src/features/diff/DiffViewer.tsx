@@ -3111,7 +3111,7 @@ function StagingDiffView({
           )}
         </HunkHeaderBar>
       )}
-      <DiffColumns mode={viewMode === "split" ? "split" : "unified"}>
+      <DiffColumns mode={viewMode === "split" ? "split" : "unified"} searchable>
         <DiffView<HunkHeaderData>
           diffFile={diffFile}
           // Worker ASTs land as a highlighter PROP, not a rebuild: the view's

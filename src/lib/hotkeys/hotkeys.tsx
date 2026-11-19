@@ -65,6 +65,7 @@ export function useAvailableActions(): Set<ActionId> {
  */
 export function useHotkeysListener() {
   const bindings = useEffectiveBindings();
+  const overrides = useSettings().data?.hotkeys;
   // Invert ActionId→binding to binding→ActionId once per settings change, so the
   // keydown handler is an O(1) lookup instead of scanning all ~64 actions every
   // keystroke. First action wins a (rare) binding collision, matching the prior
@@ -106,6 +107,22 @@ export function useHotkeysListener() {
     )
       return;
     const id = byBinding.get(binding);
+    // These chords search the visible diff/MR before falling back to their
+    // repository actions. An explicit search override (including Unbound) wins.
+    const search =
+      id === "focus-filter"
+        ? "find-in-diff"
+        : id === "show-in-explorer"
+          ? "search-pr-changes"
+          : null;
+    if (
+      search &&
+      !Object.hasOwn(overrides ?? {}, search) &&
+      dispatchAction(search)
+    ) {
+      e.preventDefault();
+      return;
+    }
     // Registered-vs-unregistered rule. A chord OWNED by an on-screen surface —
     // an action with at least one live handler, even a disabled one — must
     // never leak to the webview's browser accelerators (Ctrl+P → print,

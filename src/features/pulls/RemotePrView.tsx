@@ -158,6 +158,7 @@ import {
   splitUnifiedDiff,
 } from "@/lib/git/diff-split";
 import { useForgeGhHost } from "@/lib/git/host";
+import { FULL_OID_RE } from "@/lib/git/oid";
 import {
   forgeFeatureReady,
   glMrMergeStateOptions,
@@ -307,6 +308,7 @@ import { PendingReviewBar } from "./PendingReviewBar";
 import { PendingReviewStrip } from "./PendingReviewStrip";
 import { PrActivityFeed, usePrThreadClaims } from "./PrActivityFeed";
 import { PrCommitDetail } from "./PrCommitDetail";
+import { PrDiffSearch } from "./PrDiffSearch";
 import {
   blockedMergeLine,
   gitlabBlockedLine,
@@ -3035,7 +3037,7 @@ export function RemotePrView({
     number: shownNumber,
     lens,
     headSha: fileHeadSha,
-    enabled: chatInteractive,
+    enabled: isSelectedPr && !detailsStale && hold.interactive && !diffStale,
     changedFiles: chatChangedFiles,
     onNavigate: () => pickSection("files"),
   });
@@ -4555,6 +4557,48 @@ export function RemotePrView({
             </div>
           )}
 
+          <PrDiffSearch
+            key={`${repoPath}:${lens}:${shownNumber}:${fileHeadSha ?? ""}`}
+            sections={fileSections}
+            enabled={
+              isSelectedPr && !detailsStale && hold.interactive && !diffStale
+            }
+            pending={prDiff.isPending || prDiff.isFetching}
+            failed={prDiff.isError}
+            paused={prDiff.isPaused}
+            incomplete={
+              pr.filesUnknown ||
+              pr.filesTruncated ||
+              pr.files.some((file) => !fileSections.has(file.path))
+            }
+            onRetry={() => {
+              void details.refetch();
+              void prDiff.refetch();
+            }}
+            onSelect={(match) => {
+              if (
+                !chatIdentity ||
+                !fileHeadSha ||
+                !FULL_OID_RE.test(fileHeadSha)
+              ) {
+                toast.info(
+                  "Reload this MR to open results at their exact revision.",
+                );
+                return false;
+              }
+              if (!pr.files.some((file) => file.path === match.path)) {
+                toast.info(
+                  "This file is missing from the loaded MR file list. Reload the MR before opening this search result.",
+                );
+                return false;
+              }
+              void chatFiles.onOpenFile(
+                `${encodeURIComponent(match.path)}:${match.line}:${match.column}`,
+                match.side,
+              );
+              return true;
+            }}
+          />
           {isOpen && canCheckout && (
             <PrWorktreeCheckout
               ref={worktreeCheckout}

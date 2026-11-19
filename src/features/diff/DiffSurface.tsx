@@ -1802,7 +1802,7 @@ function RenderedDiff({
       className="outline-none"
     >
       {inSlot && <span ref={rowsProbeRef} hidden />}
-      <DiffColumns mode={viewMode}>
+      <DiffColumns mode={viewMode} searchable>
         {lineWidget?.enabled ? (
           // Line-comment mode: the multi-select variant adds clickable line numbers
           // and drag-to-select, opening the composer below the line. Opt-in only.

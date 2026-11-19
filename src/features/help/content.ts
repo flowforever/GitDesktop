@@ -1644,6 +1644,22 @@ toolbar with the view toggle. Its up/down arrows jump between change blocks in
 the file, including in Full file view. File and change navigation are also
 available from the command palette.
 
+**Find in diff** uses {{kbd:focus-filter}} while a text diff is visible. Search
+the displayed code on both sides, check the match count, and use {{key:enter}} /
+{{key:shift+enter}} or the up/down buttons to step through matches. **Aa** matches
+case; {{key:escape}} closes the find bar. Expand nearby context or switch to
+**Full file** to search code beyond the partial patch.
+
+**Search MR changes** uses {{kbd:show-in-explorer}} inside the MR and is also the
+search button beside its actions. It searches added, removed and context lines
+across the MR's loaded file diffs, grouping results by file. Choose a result to
+open that file, reveal it in the tree and scroll to its **Before** or **After**
+line. {{key:down}} / {{key:up}} select a result; {{key:enter}} opens it. An
+incomplete file list or missing diffs are called out. Results show the first
+500 matching lines, with the full matching-line count; narrow the query to see
+more. **Find in diff** and **Search MR changes** also appear in the command
+palette, and can have separate bindings under **Settings → Keyboard**.
+
 {{ai}}The right-hand chat sidebar stays available across Conversation, Files and
 Review. Choose the **Harness CLI** in its header, then choose a model and thinking
 effort beside the composer. A new CLI session receives the **MR link**. Every

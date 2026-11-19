@@ -39,6 +39,16 @@ export const capabilities: Capability[] = [
   // — Diffs & staging —
   {
     group: "Diffs & staging",
+    label:
+      "Find text in both diff panes, with match highlights, counts and keyboard navigation",
+  },
+  {
+    group: "Pull requests & review",
+    label:
+      "Search all MR diffs and open results at their exact before-or-after line",
+  },
+  {
+    group: "Diffs & staging",
     label: "Unified & split diffs, syntax-highlighted in ~190 languages",
   },
   {

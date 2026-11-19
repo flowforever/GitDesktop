@@ -312,6 +312,20 @@ export const ACTIONS = [
     defaultBinding: "mod+f",
   },
   {
+    id: "find-in-diff",
+    label: "Find in diff",
+    category: "Navigation",
+    // Uses focus-filter's chord while a diff is visible; separately rebindable.
+    defaultBinding: null,
+  },
+  {
+    id: "search-pr-changes",
+    label: "Search MR changes",
+    category: "Pull requests",
+    // Uses show-in-explorer's chord inside a merge request.
+    defaultBinding: null,
+  },
+  {
     id: "focus-comment",
     label: "Focus the comment box",
     category: "Navigation",
