@@ -1,0 +1,14 @@
+[package]
+name = "gitdesktop-windows-updater-driver"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Share the app lockfile (same Tauri/updater versions), not its link graph.
+# This runner needs only the mock runtime, not Wry or GitDesktop's plugins.
+[target.'cfg(windows)'.dependencies]
+tauri = { version = "2", default-features = false, features = ["test"] }
+tauri-plugin-updater = "2"
+reqwest = { version = "0.13.4", default-features = false }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt"] }

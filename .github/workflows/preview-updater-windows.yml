@@ -10,7 +10,7 @@ on:
       - "src-tauri/Cargo.lock"
       - "src-tauri/Cargo.toml"
       - "src-tauri/src/lib.rs"
-      - "src-tauri/src/preview_update_windows_test.rs"
+      - "src-tauri/ci/windows-updater-driver/**"
       - "src-tauri/tauri.conf.json"
       - "package.json"
       - "pnpm-lock.yaml"

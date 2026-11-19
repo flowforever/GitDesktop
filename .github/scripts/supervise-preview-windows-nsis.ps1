@@ -62,11 +62,11 @@ Write-Host 'PASS: A matches the embedded 1.0.1 executable; B has not downloaded'
 $env:GD_WIN_INSTALLED_EXE = $exe
 $env:GD_WIN_INSTALL_DIR = $install
 Write-Host 'START: deliver signed B through native Tauri updater'
-cargo test --release --locked --manifest-path src-tauri/Cargo.toml --features windows-updater-fixture --lib preview_update_windows_test::install_signed_nsis_fixture -- --ignored --exact
-if ($LASTEXITCODE -ne 0) { throw "Native updater test child failed: $LASTEXITCODE" }
+cargo run --release --locked --manifest-path src-tauri/Cargo.toml --package gitdesktop-windows-updater-driver
+if ($LASTEXITCODE -ne 0) { throw "Standalone native updater driver failed: $LASTEXITCODE" }
 if (!(Test-Path -LiteralPath (Join-Path $fixture 'native-update-invoked')) -or
     (Get-Content -Raw (Join-Path $fixture 'native-update-invoked')).Trim() -ne '1.1.1') {
-    throw 'Test child did not reach native installation.'
+    throw 'The native updater driver did not reach native installation.'
 }
 
 $deadline = [DateTime]::UtcNow.AddSeconds(120)

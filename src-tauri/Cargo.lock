@@ -1623,6 +1623,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gitdesktop-windows-updater-driver"
+version = "0.0.0"
+dependencies = [
+ "reqwest 0.13.4",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-updater",
+ "tokio",
+]
+
+[[package]]
 name = "glib"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

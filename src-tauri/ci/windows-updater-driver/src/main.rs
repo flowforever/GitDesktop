@@ -1,15 +1,23 @@
-// This module cannot be built into a release binary. The installer is the
-// actual Tauri/NSIS bundle built from GitDesktop on a disposable Actions VM.
+// This CI-only executable is not linked into GitDesktop. A and B are actual
+// GitDesktop/NSIS bundles built on a disposable Actions VM.
 
+#[cfg(windows)]
 use std::{path::PathBuf, time::Duration};
+#[cfg(windows)]
 use tauri_plugin_updater::UpdaterExt;
 
+#[cfg(windows)]
 const TEST_ID: &str = "com.thebguy.gitdesktop.preview.windowsci";
 
-#[cfg(test)]
-#[tokio::test]
-#[ignore = "requires signed disposable NSIS bundles and an isolated loopback feed"]
-async fn install_signed_nsis_fixture() {
+#[cfg(not(windows))]
+fn main() {
+    panic!("The isolated NSIS updater driver requires a hosted Windows runner");
+}
+
+#[cfg(windows)]
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    eprintln!("START: standalone native updater driver entered main");
     let path = |name| PathBuf::from(std::env::var_os(name).expect(name));
     let text = |name| std::env::var(name).expect(name);
     assert_eq!(text("GITHUB_ACTIONS"), "true");
@@ -48,6 +56,7 @@ async fn install_signed_nsis_fixture() {
     };
     assert!(builder().build().unwrap().check().await.is_err());
     let root = reqwest::Certificate::from_pem(&std::fs::read(path("GD_WIN_TEST_CA")).unwrap()).unwrap();
+    eprintln!("PASS: default trust rejects the disposable CA");
     let update = builder()
         .configure_client(move |client| client.https_only(true).tls_certs_only([root.clone()]))
         .restart_after_install(false)
@@ -61,11 +70,13 @@ async fn install_signed_nsis_fixture() {
     assert_eq!(update.current_version, "1.0.1");
     assert_eq!(update.version, "1.1.1");
     assert_eq!(update.download_url.as_str(), "https://127.0.0.1:18474/update.exe");
+    eprintln!("PASS: scoped TLS trust checked the expected A to B manifest");
     let bytes = update.download(|_, _| {}, || {}).await.unwrap();
     assert!(bytes.starts_with(b"MZ"), "expected a real PE installer");
     std::fs::write(fixture.join("native-update-invoked"), "1.1.1").unwrap();
+    eprintln!("PASS: Tauri verified the signed installer and embedded version");
     // Tauri checks the signature again, spawns the native installer and exits
-    // this Rust test process. PowerShell independently verifies the upgrade.
+    // this Rust driver process. PowerShell independently verifies the upgrade.
     update.install(&bytes).expect("start native NSIS installer");
     panic!("Windows updater unexpectedly returned without exiting");
 }

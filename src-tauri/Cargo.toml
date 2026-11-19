@@ -15,10 +15,10 @@ license = "Apache-2.0"
 name = "gitdesktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[features]
-# Enabled only by the disposable Windows updater job; ordinary Windows tests
-# and release builds retain their original Tauri feature and link graph.
-windows-updater-fixture = ["dep:reqwest", "tauri/test"]
+[workspace]
+members = ["ci/windows-updater-driver"]
+default-members = ["."]
+resolver = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -89,8 +89,6 @@ reqwest = { version = "0.13.4", default-features = false }
 # resolver can find a tool added to PATH AFTER the app launched (Windows never
 # pushes PATH edits into a running process). See agent.rs `registry_path_dirs`.
 [target.'cfg(windows)'.dependencies]
-# Only the opt-in Windows test fixture uses the updater's reqwest version.
-reqwest = { version = "0.13.4", default-features = false, optional = true }
 winreg = "0.56"
 # Broadcasting WM_SETTINGCHANGE so a freshly-added PATH entry (the "add gitdesktop
 # to PATH" launcher) reaches new terminals without a logout (path_launcher.rs), and
