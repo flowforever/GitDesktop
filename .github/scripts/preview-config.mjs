@@ -26,19 +26,35 @@ if (
   throw new Error("Missing or invalid GitDesktop version or GitHub Actions build metadata");
 }
 
-const version = `${stable}-preview.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}`;
+// Tauri compares the embedded app version, not the artifact filename. Use
+// the workflow's run/attempt ordering, independent of upstream's base version.
+// Encode each run and attempt into three numeric fields valid for macOS bundle
+// metadata, Windows installer metadata and Tauri's SemVer comparison.
+const runNumber = Number(GITHUB_RUN_NUMBER);
+const runAttempt = Number(GITHUB_RUN_ATTEMPT);
+const sequence = (runNumber - 1) * 100 + runAttempt;
+if (
+  runAttempt > 99 ||
+  !Number.isSafeInteger(sequence) ||
+  sequence >= 99_990_000
+) {
+  throw new Error("GitDesktop preview run number or attempt is out of range");
+}
+const version = [
+  1 + Math.floor(sequence / 10_000),
+  Math.floor(sequence / 100) % 100,
+  sequence % 100,
+].join(".");
 const macOS = RUNNER_OS === "macOS";
-// Keep the Mac's CFBundleShortVersionString numeric. Its CFBundleVersion
-// tracks the build/run, while the archive records the full preview SemVer.
 const config = {
   productName: "GitDesktop Preview",
   identifier: "com.thebguy.gitdesktop.preview",
-  version: macOS ? stable : version,
+  version,
   bundle: {
     createUpdaterArtifacts: false,
     ...(macOS ? {
       macOS: {
-        bundleVersion: `${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}`,
+        bundleVersion: version,
         signingIdentity: "-",
       },
     } : {}),
@@ -50,7 +66,9 @@ const writeJson = (name, value) =>
 writeJson("gitdesktop-preview.json", config);
 writeJson("gitdesktop-preview-build.json", {
   version,
-  appVersion: config.version,
+  baseVersion: stable,
+  runNumber,
+  runAttempt,
   commit: GITHUB_SHA,
   platform: RUNNER_OS,
 });

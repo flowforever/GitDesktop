@@ -10,6 +10,7 @@ on:
     paths:
       - ".github/workflows/push-preview.yml"
       - ".github/scripts/preview-config.mjs"
+      - ".github/scripts/preview-config.test.mjs"
   workflow_dispatch:
 
 permissions:
@@ -77,6 +78,8 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+      - name: Verify preview versioning
+        run: node --test .github/scripts/preview-config.test.mjs
       - name: Prepare isolated preview version
         id: preview
         run: node .github/scripts/preview-config.mjs
