@@ -47,10 +47,12 @@ function serve() {
       } else if (request.url === "/latest.json") {
         stats.checks += 1;
         setStats();
+        console.log(`served manifest #${stats.checks}`);
         response.writeHead(200, { "content-type": "application/json" }).end(manifest);
       } else if (request.url === "/update.AppImage") {
         stats.downloads += 1;
         setStats();
+        console.log(`served signed payload #${stats.downloads}`);
         response.writeHead(200, { "content-type": "application/octet-stream" });
         createReadStream(file("b", "build.AppImage")).pipe(response);
       } else {
@@ -86,19 +88,36 @@ const tlsHealth = (ca) =>
     request.on("error", reject);
   });
 
-const webdriver = async (method, path, body, milliseconds = 10_000) => {
-  const response = await fetch(`http://127.0.0.1:4444${path}`, {
-    method,
-    headers: { "content-type": "application/json" },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    signal: AbortSignal.timeout(milliseconds),
-  });
-  if (response.status === 204) return null;
-  const result = await response.json();
-  if (!response.ok || result.value?.error) {
-    throw new Error(`${method} ${path}: ${JSON.stringify(result.value)}`);
+const phase = process.argv[2];
+const port = process.env.GD_WEBDRIVER_PORT;
+const stage = async (name, fn) => {
+  console.log(`[${phase}] START ${name}`);
+  try {
+    const result = await fn();
+    console.log(`[${phase}] PASS ${name}`);
+    return result;
+  } catch (cause) {
+    throw new Error(`[${phase}] FAILED ${name}`, { cause });
   }
-  return result.value;
+};
+const webdriver = async (method, path, body, milliseconds = 10_000) => {
+  assert.match(port ?? "", /^444[46]$/);
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: { "content-type": "application/json" },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(milliseconds),
+    });
+    if (response.status === 204) return null;
+    const result = await response.json();
+    if (!response.ok || result.value?.error) {
+      throw new Error(`HTTP ${response.status}: ${JSON.stringify(result.value)}`);
+    }
+    return result.value;
+  } catch (cause) {
+    throw new Error(`WebDriver ${method} ${path} (deadline ${milliseconds} ms)`, { cause });
+  }
 };
 
 const openApp = async () => {
@@ -134,27 +153,39 @@ const updateText = (session) =>
 const hash = (...parts) =>
   createHash("sha256").update(readFileSync(file(...parts))).digest("hex");
 
-async function test() {
-  await waitFor("trusted loopback TLS feed", () => tlsHealth(read("ca.pem")));
-  await assert.rejects(
-    () => tlsHealth(),
-    (error) => /certificate|issuer/i.test(error.message),
-    "the loopback server must not be trusted without the disposable CA",
+async function waitForDriver() {
+  await stage("WebDriver readiness", () =>
+    waitFor("WebDriver /status ready", async () =>
+      Boolean((await webdriver("GET", "/status"))?.ready),
+    ),
   );
-  await waitFor("WebDriver readiness", async () =>
-    Boolean((await webdriver("GET", "/status"))?.ready),
-  );
+}
+
+async function testSeed() {
+  await stage("loopback TLS trust and rejection", async () => {
+    await waitFor("trusted loopback TLS feed", () => tlsHealth(read("ca.pem")));
+    await assert.rejects(
+      () => tlsHealth(),
+      (error) => /certificate|issuer/i.test(error.message),
+      "the loopback server must not be trusted without the disposable CA",
+    );
+  });
+  await waitForDriver();
   assert.equal(hash("installed.AppImage"), hash("a", "build.AppImage"));
   assert.notEqual(hash("installed.AppImage"), hash("b", "build.AppImage"));
 
-  let session = await openApp();
-  try {
-    await waitFor("seed version", async () => (await appVersion(session)) === oldVersion);
+  const session = await stage("open A WebDriver session", openApp);
+  await stage(`read seed version ${oldVersion}`, () =>
+    waitFor("seed version", async () => (await appVersion(session)) === oldVersion),
+  );
+  await stage(`show prompt for ${newVersion} without downloading`, async () => {
     await waitFor("update notification", async () =>
       (await updateText(session)).includes(newVersion),
     );
     assert.equal(readStats().downloads, 0, "download started before consent");
     assert.equal(hash("installed.AppImage"), hash("a", "build.AppImage"));
+  });
+  await stage("accept update and verify replacement bytes", async () => {
     const result = await webdriver("POST", `/session/${session}/element`, {
       using: "xpath",
       value: '//section[@aria-label="GitDesktop Preview update"]//button[normalize-space()="Download and install"]',
@@ -162,36 +193,43 @@ async function test() {
     const button = result["element-6066-11e4-a52e-4f735466cecf"];
     assert.ok(button);
     await webdriver("POST", `/session/${session}/element/${button}/click`, {});
-    await waitFor("successful installation", async () =>
-      (await updateText(session)).includes("Update installed"),
-      60_000,
-    );
+    const resultText = await waitFor("installation outcome", async () => {
+      const notice = await updateText(session);
+      return /Update installed|could not be installed/.test(notice) && notice;
+    }, 60_000);
+    assert.match(resultText, /Update installed/, resultText);
     assert.equal(readStats().downloads, 1, "expected one explicit download");
     assert.equal(
       hash("installed.AppImage"),
       hash("b", "build.AppImage"),
       "the updater did not replace the on-disk AppImage with signed B",
     );
-  } finally {
-    await webdriver("DELETE", `/session/${session}`);
-  }
+  });
+  // The shell closes this entire disposable WebDriver/Xvfb/D-Bus group so B
+  // cannot reuse stale WebKit automation processes from the seed session.
+}
 
+async function testRelaunch() {
   const firstChecks = readStats().checks;
-  session = await openApp();
-  try {
-    await waitFor("B to be running after relaunch", async () =>
+  assert.equal(readStats().downloads, 1, "expected exactly one earlier download");
+  assert.equal(hash("installed.AppImage"), hash("b", "build.AppImage"));
+  await waitForDriver();
+  const session = await stage("open B WebDriver session in fresh desktop", openApp);
+  await stage(`read version ${newVersion} after relaunch`, () =>
+    waitFor("B to be running after relaunch", async () =>
       (await appVersion(session)) === newVersion,
-    );
+    ),
+  );
+  await stage("recheck manifest without offering or downloading B again", async () => {
     await waitFor("B to check the same manifest", () => readStats().checks > firstChecks);
     await sleep(750);
     assert.equal(await updateText(session), "");
     assert.equal(readStats().downloads, 1);
-  } finally {
-    await webdriver("DELETE", `/session/${session}`);
-  }
+  });
   console.log(`Native signed Linux update passed: ${oldVersion} → ${newVersion}`);
 }
 
-if (process.argv[2] === "feed") serve();
-else if (process.argv[2] === "test") await test();
-else throw new Error("Expected feed or test");
+if (phase === "feed") serve();
+else if (phase === "test-a") await testSeed();
+else if (phase === "test-b") await testRelaunch();
+else throw new Error("Expected feed, test-a or test-b");

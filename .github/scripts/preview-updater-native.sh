@@ -6,17 +6,35 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 umask 077
 GD_NATIVE_DIR=$(mktemp -d)
 export GD_NATIVE_DIR
+stop_driver() {
+  if [ -z "${driver_pid:-}" ]; then return; fi
+  # setsid gives each complete desktop stack a private process group. Stop
+  # WebKit and D-Bus with the bridge, rather than carrying them into launch B.
+  kill -TERM -- "-$driver_pid" 2>/dev/null || true
+  for _ in {1..20}; do
+    if ! kill -0 -- "-$driver_pid" 2>/dev/null; then break; fi
+    sleep 0.1
+  done
+  kill -KILL -- "-$driver_pid" 2>/dev/null || true
+  wait "$driver_pid" 2>/dev/null || true
+  unset driver_pid
+}
 cleanup() {
   status=$?
   trap - EXIT
   if [ "$status" -ne 0 ]; then
-    for log in "$GD_NATIVE_DIR"/{driver,feed}.log; do
-      if [ -f "$log" ]; then tail -n 70 "$log"; fi
+    for log in "$GD_NATIVE_DIR"/{driver-a.log,driver-b.log,feed.log,feed-stats.json}; do
+      if [ -f "$log" ]; then
+        echo "=== ${log##*/} ==="
+        tail -n 70 "$log"
+      fi
     done
   fi
-  for pid in "${driver_pid:-}" "${feed_pid:-}"; do
-    if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
-  done
+  stop_driver
+  if [ -n "${feed_pid:-}" ]; then
+    kill "$feed_pid" 2>/dev/null || true
+    wait "$feed_pid" 2>/dev/null || true
+  fi
   rm -rf -- "$GD_NATIVE_DIR"
   exit "$status"
 }
@@ -111,6 +129,14 @@ chmod u+x "$GD_NATIVE_DIR/launch"
 
 node .github/scripts/preview-updater-native.mjs feed >"$GD_NATIVE_DIR/feed.log" 2>&1 &
 feed_pid=$!
-xvfb-run -a dbus-run-session -- tauri-driver --native-driver /usr/bin/WebKitWebDriver >"$GD_NATIVE_DIR/driver.log" 2>&1 &
-driver_pid=$!
-timeout -k 5 240 node .github/scripts/preview-updater-native.mjs test
+run_phase() {
+  local phase=$1 port=$2 native_port=$3
+  setsid xvfb-run -a dbus-run-session -- tauri-driver \
+    --port "$port" --native-port "$native_port" \
+    --native-driver /usr/bin/WebKitWebDriver >"$GD_NATIVE_DIR/driver-$phase.log" 2>&1 &
+  driver_pid=$!
+  GD_WEBDRIVER_PORT="$port" timeout -k 5 190 node .github/scripts/preview-updater-native.mjs "test-$phase"
+  stop_driver
+}
+run_phase a 4444 4445
+run_phase b 4446 4447
