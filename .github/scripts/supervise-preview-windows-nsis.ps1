@@ -52,12 +52,12 @@ if ($seedExit -ne 0 -or !$installedExists) {
 }
 $installedHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
 if ($installedHash -ne $hashA) {
-    throw "A executable hash differs from the rendered NSIS payload. Expected $hashA; got $installedHash."
+    throw "A executable hash differs from the independently extracted NSIS payload. Expected $hashA; got $installedHash."
 }
 if ((Get-Content -Raw (Join-Path $fixture 'downloads')).Trim() -ne '0') {
     throw 'B downloaded before the fixture allowed installation.'
 }
-Write-Host 'PASS: A matches the compiled 1.0.1 executable; B has not downloaded'
+Write-Host 'PASS: A matches the embedded 1.0.1 executable; B has not downloaded'
 
 $env:GD_WIN_INSTALLED_EXE = $exe
 $env:GD_WIN_INSTALL_DIR = $install
@@ -84,11 +84,11 @@ while ([DateTime]::UtcNow -lt $deadline) {
     }
     Start-Sleep -Milliseconds 500
 }
-if (!$updated) { throw 'Native installer did not replace the isolated file with compiled B.' }
+if (!$updated) { throw 'Native installer did not replace the isolated file with the embedded B payload.' }
 if ((Get-Content -Raw (Join-Path $fixture 'downloads')).Trim() -ne '1') {
     throw 'Expected exactly one signed B download.'
 }
-Write-Host 'PASS: native NSIS replaced A with the exact compiled B executable (1.1.1)'
+Write-Host 'PASS: native NSIS replaced A with the exact embedded B executable (1.1.1)'
 
 Write-Host 'START: launch the installed B executable'
 $launched = Start-Process -FilePath $exe -PassThru
