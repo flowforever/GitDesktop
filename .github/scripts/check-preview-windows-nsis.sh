@@ -12,9 +12,14 @@ umask 077
 dir=$(mktemp -d "$(cygpath -u "$RUNNER_TEMP")/gd-win.XXXXXX")
 export GD_WIN_FIXTURE_DIR="$(cygpath -w "$dir")"
 export NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost
+verified=false
 cleanup() {
   code=$?
   trap - EXIT
+  if [ "$code" -eq 0 ] && [ "$verified" != true ]; then
+    printf 'Native Windows acceptance did not reach the final A→B verification.\n' >&2
+    code=1
+  fi
   if [ -n "${server:-}" ]; then
     kill "$server" 2>/dev/null || true
     wait "$server" 2>/dev/null || true
@@ -132,3 +137,13 @@ node .github/scripts/probe-preview-windows-https.mjs "$GD_WIN_TEST_CA"
 printf '%s\n' 'PASS: loopback HTTPS feed ready'
 stage=supervise-native-install
 pwsh -NoProfile -File .github/scripts/supervise-preview-windows-nsis.ps1
+stage=verify-native-completion
+# A child exit of zero (including Tauri's deliberate process::exit(0))
+# is not the acceptance result. This directory is fresh for this attempt.
+if [ ! -f "$dir/native-update-verified" ] ||
+   [ "$(cat "$dir/native-update-verified")" != "$(cat "$dir/b/app.sha256")" ]; then
+  printf 'Missing or incorrect verification marker for the relaunched B payload.\n' >&2
+  exit 1
+fi
+verified=true
+printf 'PASS: Windows A→B replacement and relaunch independently confirmed\n'

@@ -62,8 +62,28 @@ Write-Host 'PASS: A matches the embedded 1.0.1 executable; B has not downloaded'
 $env:GD_WIN_INSTALLED_EXE = $exe
 $env:GD_WIN_INSTALL_DIR = $install
 Write-Host 'START: deliver signed B through native Tauri updater'
-cargo run --release --locked --manifest-path src-tauri/Cargo.toml --package gitdesktop-windows-updater-driver
-if ($LASTEXITCODE -ne 0) { throw "Standalone native updater driver failed: $LASTEXITCODE" }
+cargo build --release --locked --manifest-path src-tauri/Cargo.toml --package gitdesktop-windows-updater-driver
+if ($LASTEXITCODE -ne 0) { throw "Standalone native updater driver build failed: $LASTEXITCODE" }
+$driverExe = Join-Path $PWD 'src-tauri/target/release/gitdesktop-windows-updater-driver.exe'
+$driverStdout = Join-Path $fixture 'driver.stdout'
+$driverStderr = Join-Path $fixture 'driver.stderr'
+# Tauri uses ShellExecuteW to spawn NSIS, then exits its own process. Wait
+# for the specific driver PID, not cargo run or the installer process tree.
+$driver = Start-Process -FilePath $driverExe -PassThru -NoNewWindow `
+    -RedirectStandardOutput $driverStdout -RedirectStandardError $driverStderr
+try {
+    Write-Host "Driver PID: $($driver.Id)"
+    if (!$driver.WaitForExit(120000)) {
+        $driver.Kill()
+        throw 'Standalone native updater driver did not exit within 120 seconds.'
+    }
+    $driverExit = $driver.ExitCode
+} finally {
+    $driver.Dispose()
+    Get-Content -LiteralPath $driverStdout, $driverStderr
+}
+Write-Host "Standalone native updater driver exit: $driverExit"
+if ($driverExit -ne 0) { throw "Standalone native updater driver failed: $driverExit" }
 if (!(Test-Path -LiteralPath (Join-Path $fixture 'native-update-invoked')) -or
     (Get-Content -Raw (Join-Path $fixture 'native-update-invoked')).Trim() -ne '1.1.1') {
     throw 'The native updater driver did not reach native installation.'
@@ -105,3 +125,4 @@ try {
 } finally {
     Stop-Process -Id $launched.Id -Force -ErrorAction SilentlyContinue
 }
+[IO.File]::WriteAllText((Join-Path $fixture 'native-update-verified'), $hashB)
