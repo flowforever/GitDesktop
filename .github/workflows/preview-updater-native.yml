@@ -1,0 +1,64 @@
+name: preview-updater-native
+
+# This job operates only on two throwaway packages in an isolated Linux runner.
+# It never consumes repository secrets or writes a GitHub release or artifact.
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/preview-updater-native.yml"
+      - ".github/scripts/preview-updater-native.*"
+      - ".github/actions/pin-linuxdeploy/**"
+      - ".github/scripts/appimage-guard.sh"
+      - ".github/scripts/preview-config.mjs"
+      - "src/App.tsx"
+      - "src/features/updates/**"
+      - "src-tauri/tauri.conf.json"
+      - "src-tauri/capabilities/**"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "pnpm-lock.yaml"
+      - ".node-version"
+      - "package.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signed-linux-a-to-b:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6.1.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          save-if: false
+      - name: Install Linux packaging and WebDriver dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf build-essential libssl-dev file libgles2 \
+            webkit2gtk-driver xvfb xauth dbus-x11
+      - name: Pin AppImage tools
+        uses: ./.github/actions/pin-linuxdeploy
+      - name: Install frontend dependencies and the official Tauri WebDriver bridge
+        run: |
+          pnpm install --frozen-lockfile
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Build signed A and B, accept update and relaunch
+        run: bash .github/scripts/preview-updater-native.sh

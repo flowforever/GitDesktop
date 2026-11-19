@@ -77,9 +77,16 @@ The offline Rust fixture uses the same minisign verification dependency and
 signed-version field as the updater. It rejects same/older, wrong-key,
 tampered, unversioned and mislabelled payloads. This proves the signed
 payload/manifest contract, not the actual native install/restart path.
-For actual installation testing, use two signed test builds and an isolated,
-trusted HTTPS staging endpoint; do not enable insecure transport or disable
-signature checks to make a loopback fixture work.
+The PR-only `preview-updater-native` job is the separate Linux AppImage
+acceptance test. It builds two actual signed packages, serves B via HTTPS on
+`127.0.0.1`, then uses the official Tauri/WebKit WebDriver under Xvfb to launch
+A, verify that the prompt downloads nothing until clicked, accept it,
+checksum the installed AppImage against B, and verify B on relaunch. Linux
+rustls uses a disposable CA via `SSL_CERT_FILE` only in the app subprocess;
+host trust and TLS verification are not changed. The scripts do not publish
+packages or retain keys. A passing run is required before treating Linux
+native installation as verified; macOS and Windows need their own signed
+acceptance runs.
 
 See [Tauri updater](https://v2.tauri.app/plugin/updater/) and
 [macOS signing](https://v2.tauri.app/distribute/sign/macos/).
