@@ -22,7 +22,9 @@ export function PreviewUpdateNotice() {
     };
     void getIdentifier()
       .then((identifier) =>
-        active && identifier === "com.thebguy.gitdesktop.preview"
+        active &&
+        (identifier === "com.thebguy.gitdesktop.preview" ||
+          identifier === "com.thebguy.gitdesktop.preview.staging")
           ? check({ timeout: 10_000 })
           : null,
       )

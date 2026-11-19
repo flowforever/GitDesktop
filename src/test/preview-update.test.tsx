@@ -70,6 +70,15 @@ describe("signed preview updates", () => {
     expect(check).not.toHaveBeenCalled();
   });
 
+  it("checks the separately identified staging app", async () => {
+    isTauri.mockReturnValue(true);
+    getIdentifier.mockResolvedValue("com.thebguy.gitdesktop.preview.staging");
+    check.mockResolvedValue(null);
+    render(<PreviewUpdateNotice />);
+    await waitFor(() => expect(check).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
   it("never checks a stable app even when mounted", async () => {
     isTauri.mockReturnValue(true);
     getIdentifier.mockResolvedValue("com.thebguy.gitdesktop");

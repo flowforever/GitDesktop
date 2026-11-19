@@ -24,3 +24,12 @@ rm -f -- "$fixture/preview.key" "$fixture/other.key"
 
 GITDESKTOP_SIGNATURE_FIXTURE_DIR="$fixture" \
   cargo run --locked --quiet --manifest-path .github/test-fixtures/preview-signature/Cargo.toml
+
+# Exercise the production verifier entry point with real disposable signatures.
+export GITDESKTOP_PREVIEW_UPDATER_PUBKEY="$(cat "$fixture/preview.key.pub")"
+verifier=(cargo run --locked --quiet --manifest-path .github/test-fixtures/preview-signature/Cargo.toml -- verify)
+"${verifier[@]}" "$fixture/new.bin" "$fixture/new.bin.sig" 2.0.1
+if "${verifier[@]}" "$fixture/new.bin" "$fixture/new.bin.sig" 2.0.2 > /dev/null 2>&1; then
+  echo "Production verifier unexpectedly accepted a mislabelled signature" >&2
+  exit 1
+fi

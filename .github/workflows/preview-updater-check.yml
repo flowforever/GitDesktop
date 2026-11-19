@@ -7,6 +7,8 @@ on:
       - ".github/PREVIEW-UPDATES.md"
       - ".github/scripts/check-preview-signature.sh"
       - ".github/scripts/preview-config*.mjs"
+      - ".github/scripts/preview-release*.mjs"
+      - ".github/workflows/signed-preview.yml"
       - ".github/test-fixtures/preview-signature/**"
       - ".github/workflows/preview-updater-check.yml"
       - ".github/workflows/push-preview.yml"
@@ -42,7 +44,7 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
       - name: Verify monotonic versioning
-        run: node --test .github/scripts/preview-config.test.mjs
+        run: node --test .github/scripts/preview-config.test.mjs .github/scripts/preview-release.test.mjs
       - name: Verify launch notice, consent and stable isolation
         run: pnpm exec vitest run src/test/preview-update.test.tsx src/test/app-update-removal.test.tsx
       - name: Verify genuine Tauri signatures with a disposable key

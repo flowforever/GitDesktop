@@ -36,6 +36,20 @@ fn verify_update(
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [command, payload, signature, version] = args.as_slice() {
+        if command != "verify" {
+            return Err("unknown preview verification command".into());
+        }
+        let public = std::env::var("GITDESKTOP_PREVIEW_UPDATER_PUBKEY")?;
+        return verify_update(
+            &fs::read(payload)?,
+            &fs::read_to_string(signature)?,
+            &public,
+            &Version::new(0, 0, 0),
+            &Version::parse(version)?,
+        );
+    }
     let dir = std::env::var("GITDESKTOP_SIGNATURE_FIXTURE_DIR")?;
     let dir = Path::new(&dir);
     let installed = Version::parse("1.99.99")?;

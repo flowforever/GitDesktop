@@ -46,20 +46,42 @@ const version = [
   sequence % 100,
 ].join(".");
 const macOS = RUNNER_OS === "macOS";
+const channel = process.env.GITDESKTOP_PREVIEW_SIGNING_CHANNEL;
+const signed = channel === "production" || channel === "staging";
+if (channel && !signed) throw new Error("Unknown preview signing channel");
+const production =
+  "https://github.com/flowforever/GitDesktop/releases/download/preview-channel/latest.json";
+let updater = { endpoints: [] };
+if (signed) {
+  const pubkey = process.env.GITDESKTOP_PREVIEW_UPDATER_PUBKEY?.trim();
+  const stableKey = JSON.parse(readFileSync(
+    new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8",
+  )).plugins.updater.pubkey;
+  const endpoint = new URL(channel === "production" ? production :
+    process.env.GITDESKTOP_PREVIEW_STAGING_ENDPOINT);
+  if (!pubkey || pubkey === stableKey || pubkey !== Buffer.from(pubkey, "base64").toString("base64") ||
+      !Buffer.from(pubkey, "base64").toString("utf8").startsWith("untrusted comment: minisign public key") ||
+      endpoint.protocol !== "https:" || endpoint.username || endpoint.password ||
+      endpoint.search || endpoint.hash ||
+      (channel === "staging" && endpoint.href.toLowerCase() === production.toLowerCase())) {
+    throw new Error("Expected a valid preview-only public key and isolated HTTPS endpoint");
+  }
+  updater = { endpoints: [endpoint.href], pubkey, requireSignedVersion: true };
+}
 const config = {
-  productName: "GitDesktop Preview",
-  identifier: "com.thebguy.gitdesktop.preview",
+  productName: channel === "staging" ? "GitDesktop Preview Staging" : "GitDesktop Preview",
+  identifier: channel === "staging" ? "com.thebguy.gitdesktop.preview.staging" : "com.thebguy.gitdesktop.preview",
   version,
   bundle: {
-    createUpdaterArtifacts: false,
+    createUpdaterArtifacts: signed,
     ...(macOS ? {
       macOS: {
         bundleVersion: version,
-        signingIdentity: "-",
+        ...(!signed ? { signingIdentity: "-" } : {}),
       },
     } : {}),
   },
-  plugins: { updater: { endpoints: [] } },
+  plugins: { updater },
 };
 const writeJson = (name, value) =>
   writeFileSync(join(RUNNER_TEMP, name), `${JSON.stringify(value, null, 2)}\n`);
@@ -71,5 +93,6 @@ writeJson("gitdesktop-preview-build.json", {
   runAttempt,
   commit: GITHUB_SHA,
   platform: RUNNER_OS,
+  ...(signed ? { channel } : {}),
 });
 appendFileSync(GITHUB_OUTPUT, `version=${version}\n`);

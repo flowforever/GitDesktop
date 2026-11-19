@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const run = (runner, number, attempt) => {
+const run = (runner, number, attempt, extra = {}) => {
   const dir = mkdtempSync(join(tmpdir(), "gitdesktop-preview-test-"));
   try {
     const output = join(dir, "output");
@@ -17,6 +17,10 @@ const run = (runner, number, attempt) => {
         encoding: "utf8",
         env: {
           ...process.env,
+          GITDESKTOP_PREVIEW_SIGNING_CHANNEL: "",
+          GITDESKTOP_PREVIEW_UPDATER_PUBKEY: "",
+          GITDESKTOP_PREVIEW_STAGING_ENDPOINT: "",
+          ...extra,
           RUNNER_OS: runner,
           RUNNER_TEMP: dir,
           GITHUB_OUTPUT: output,
@@ -62,4 +66,35 @@ test("run rollover and retries always advance the installed app version", () => 
   assert.equal(run("Linux", 999900, 99).config.version, "9999.99.99");
   assert.match(run("Linux", 100, 100).stderr, /out of range/);
   assert.match(run("Linux", 999901, 1).stderr, /out of range/);
+});
+
+const testKey = Buffer.from(
+  "untrusted comment: minisign public key: disposable-test-key\nsynthetic",
+).toString("base64");
+test("production and staging require distinct secure update channels", () => {
+  const production = run("macOS", 1, 1, {
+    GITDESKTOP_PREVIEW_SIGNING_CHANNEL: "production",
+    GITDESKTOP_PREVIEW_UPDATER_PUBKEY: testKey,
+  });
+  assert.equal(production.status, 0);
+  assert.equal(production.config.bundle.createUpdaterArtifacts, true);
+  assert.equal(production.config.bundle.macOS.signingIdentity, undefined);
+  assert.equal(production.config.plugins.updater.requireSignedVersion, true);
+  assert.equal(production.config.plugins.updater.pubkey, testKey);
+  const productionURL = production.config.plugins.updater.endpoints[0];
+
+  const staging = (endpoint) => run("Linux", 1, 1, {
+    GITDESKTOP_PREVIEW_SIGNING_CHANNEL: "staging",
+    GITDESKTOP_PREVIEW_UPDATER_PUBKEY: testKey,
+    GITDESKTOP_PREVIEW_STAGING_ENDPOINT: endpoint,
+  });
+  const valid = staging("https://example.com/gitdesktop-staging/latest.json");
+  assert.equal(valid.status, 0);
+  assert.equal(valid.manifest.channel, "staging");
+  assert.equal(valid.config.identifier, "com.thebguy.gitdesktop.preview.staging");
+  assert.notEqual(staging(productionURL).status, 0);
+  assert.notEqual(staging("http://example.com/latest.json").status, 0);
+  assert.notEqual(staging("https://user:pw@example.com/latest.json").status, 0);
+  assert.notEqual(staging("https://example.com/latest.json?token=example").status, 0);
+  assert.notEqual(run("Linux", 1, 1, { GITDESKTOP_PREVIEW_SIGNING_CHANNEL: "production" }).status, 0);
 });
