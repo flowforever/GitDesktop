@@ -133,15 +133,17 @@ DMG is quarantined and mounts read-only via `hdiutil`. There is no test
 switch or fixture CA in shipped builds, and no system trust change.
 This is not a Finder installation or Gatekeeper approval test.
 
-For a future native Windows CI gate, use a separate test-only Tauri
-executable and client-local fixture CA, two NSIS installers for a
-disposable bundle ID, and a supervisor on a fresh Windows runner. Install
-A under the test account; verify A before permitting the signed B
-download. Invoke the native updater in the supervised child (it starts
-NSIS and exits), then verify the installed file version/hash, launch B,
-and confirm no repeated update. Until that is implemented and passes,
-perform the Windows staging acceptance on a test machine. Updater
-signatures are not Authenticode; evaluate SmartScreen separately.
+The read-only `preview-updater-windows` workflow builds two real GitDesktop
+NSIS bundles with a disposable bundle ID and fixture signing key, then
+installs A per-user under the fresh GitHub-hosted runner's temporary directory.
+A test-only Rust child uses a client-local fixture CA, checks and verifies B,
+and calls genuine Tauri NSIS installation. The supervisor checks no early
+download, exact on-disk A and B hashes, and that the installed B launches and
+opens its window. No fixture trust is compiled into the bundles or installed
+into Windows. This tests download, native replacement and relaunch; UI consent
+is covered by the separate mocked UI test, and release-binary HTTPS/normal
+SmartScreen behavior still require staging. A real Actions pass is required
+before calling this Windows native flow verified.
 
 Production creates a new `preview-<version>` **prerelease** with immutable
 by-policy asset names and SHA-256 checks; existing published versioned assets

@@ -1,0 +1,50 @@
+name: preview-updater-windows
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/preview-updater-windows.yml"
+      - ".github/scripts/*preview-windows*"
+      - ".github/scripts/preview-config.mjs"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/src/lib.rs"
+      - "src-tauri/src/preview_update_windows_test.rs"
+      - "src-tauri/tauri.conf.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".node-version"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signed-windows-nsis-a-to-b:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: "./src-tauri -> target"
+          save-if: false
+      - run: pnpm install --frozen-lockfile
+      - name: Verify real signed NSIS A to B replacement and relaunch
+        shell: bash
+        run: bash .github/scripts/check-preview-windows-nsis.sh

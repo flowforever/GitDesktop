@@ -32,6 +32,8 @@ mod nav_guard;
 mod oplog;
 mod path_launcher;
 mod preview_update;
+#[cfg(all(test, target_os = "windows"))]
+mod preview_update_windows_test;
 mod pty;
 mod research;
 mod review_notes;

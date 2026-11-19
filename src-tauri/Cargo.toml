@@ -75,9 +75,9 @@ dunce = "1"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
 
-# The signed DMG acceptance test uses an ephemeral, client-local HTTPS root.
+# Native update acceptance tests use ephemeral, client-local HTTPS roots.
 # These features and their certificate setup are never enabled in shipped apps.
-[target.'cfg(target_os = "macos")'.dev-dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 reqwest = { version = "0.13.4", default-features = false }
 
