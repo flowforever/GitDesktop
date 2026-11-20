@@ -25,7 +25,12 @@ function closeUpdate(update: Update) {
 
 // Mounted only by the signed preview build. The stable app and unsigned CI
 // artifacts keep the upstream behavior of making no startup update requests.
-export function PreviewUpdateNotice() {
+export function PreviewUpdateNotice({
+  forkStable = false,
+}: {
+  forkStable?: boolean;
+}) {
+  const name = forkStable ? "GitDesktop Flowforever" : "GitDesktop Preview";
   const [eligible, setEligible] = useState(false);
   const [version, setVersion] = useState("");
   const [open, setOpen] = useState(false);
@@ -39,38 +44,45 @@ export function PreviewUpdateNotice() {
   const later = useRef<HTMLButtonElement>(null);
   const checkButton = useRef<HTMLButtonElement>(null);
 
-  const checkForUpdate = useCallback(async (manual: boolean) => {
-    if (!mounted.current || pending.current || resource.current) return;
-    pending.current = true;
-    setChecking(true);
-    setMessage("");
-    try {
-      const candidate = await check({ timeout: 10_000 });
-      if (!candidate) {
+  const checkForUpdate = useCallback(
+    async (manual: boolean) => {
+      if (!mounted.current || pending.current || resource.current) return;
+      pending.current = true;
+      setChecking(true);
+      setMessage("");
+      try {
+        const candidate = await check({ timeout: 10_000 });
+        if (!candidate) {
+          if (manual && mounted.current)
+            setMessage(
+              forkStable
+                ? "No update is available."
+                : "No preview update is available.",
+            );
+          return;
+        }
+        if (
+          !mounted.current ||
+          (!manual && dismissedVersions.has(candidate.version))
+        ) {
+          closeUpdate(candidate);
+          return;
+        }
+        resource.current = candidate;
+        setInstallState("available");
+        setVersion(candidate.version);
+        setOpen(true);
+      } catch {
+        // An offline or unavailable update feed never blocks startup.
         if (manual && mounted.current)
-          setMessage("No preview update is available.");
-        return;
+          setMessage("Could not check for updates. Try again.");
+      } finally {
+        pending.current = false;
+        if (mounted.current) setChecking(false);
       }
-      if (
-        !mounted.current ||
-        (!manual && dismissedVersions.has(candidate.version))
-      ) {
-        closeUpdate(candidate);
-        return;
-      }
-      resource.current = candidate;
-      setInstallState("available");
-      setVersion(candidate.version);
-      setOpen(true);
-    } catch {
-      // An offline or unavailable update feed never blocks startup.
-      if (manual && mounted.current)
-        setMessage("Could not check for updates. Try again.");
-    } finally {
-      pending.current = false;
-      if (mounted.current) setChecking(false);
-    }
-  }, []);
+    },
+    [forkStable],
+  );
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -80,8 +92,10 @@ export function PreviewUpdateNotice() {
       .then((identifier) => {
         if (
           active &&
-          (identifier === "com.thebguy.gitdesktop.preview" ||
-            identifier === "com.thebguy.gitdesktop.preview.staging")
+          (forkStable
+            ? identifier === "io.github.flowforever.gitdesktop"
+            : identifier === "com.thebguy.gitdesktop.preview" ||
+              identifier === "com.thebguy.gitdesktop.preview.staging")
         ) {
           setEligible(true);
           void checkForUpdate(false);
@@ -94,7 +108,7 @@ export function PreviewUpdateNotice() {
       if (resource.current) closeUpdate(resource.current);
       resource.current = null;
     };
-  }, [checkForUpdate]);
+  }, [checkForUpdate, forkStable]);
 
   const dismiss = () => {
     const candidate = resource.current;
@@ -123,8 +137,8 @@ export function PreviewUpdateNotice() {
         dismiss();
         setMessage(
           quitting
-            ? "Disk image opened. Quitting GitDesktop Preview…"
-            : "Disk image opened. Quit GitDesktop Preview before replacing it in Applications.",
+            ? `Disk image opened. Quitting ${name}…`
+            : `Disk image opened. Quit ${name} before replacing it in Applications.`,
         );
       } else {
         await update.downloadAndInstall(undefined, {
@@ -166,17 +180,17 @@ export function PreviewUpdateNotice() {
         }}
       >
         <DialogContent
-          aria-label="GitDesktop Preview update"
+          aria-label={`${name} update`}
           initialFocus={() => later.current}
           finalFocus={() => checkButton.current}
           showCloseButton={false}
         >
           <DialogHeader>
-            <DialogTitle>GitDesktop Preview update</DialogTitle>
+            <DialogTitle>{name} update</DialogTitle>
             <DialogDescription>
-              GitDesktop Preview {version} is available.
+              {name} {version} is available.
               {isMac &&
-                " The app will download and verify the disk image, open it, then quit so you can replace it in Applications. This preview is not Apple-notarized."}
+                ` The app will download and verify the disk image, open it, then quit so you can replace it in Applications. This ${forkStable ? "build" : "preview"} is not Apple-notarized.`}
             </DialogDescription>
           </DialogHeader>
           {installState !== "available" && (
@@ -186,7 +200,7 @@ export function PreviewUpdateNotice() {
                   ? "Downloading and verifying the disk image…"
                   : "Downloading and installing the update…"
                 : installState === "installed"
-                  ? "Update installed. Restart GitDesktop Preview to use it."
+                  ? `Update installed. Restart ${name} to use it.`
                   : isMac
                     ? "The disk image could not be verified or opened. You can try again."
                     : "The update could not be installed. You can try again."}

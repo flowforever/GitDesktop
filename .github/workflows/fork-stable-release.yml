@@ -1,0 +1,179 @@
+name: fork-stable-release
+
+# Never triggered by pushes, tags, or pull requests.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New fork stable version (for example 0.15.0)
+        required: true
+        default: '0.15.0'
+        type: string
+      publish:
+        description: Publish the validated release after the owner approves the publish environment
+        default: false
+        type: boolean
+      accept_os_signing_status:
+        description: Acknowledge ad hoc macOS signing without notarization and unsigned Windows OS signing
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flowforever-fork-stable-release
+  cancel-in-progress: false
+
+env:
+  FORK_STABLE_VERSION: ${{ inputs.version }}
+  GITDESKTOP_FORK_STABLE_UPDATER_PUBKEY: ${{ vars.GITDESKTOP_FORK_STABLE_UPDATER_PUBKEY }}
+
+jobs:
+  bundle:
+    if: github.repository == 'flowforever/GitDesktop' && github.ref == 'refs/heads/master'
+    environment: fork-stable-signing
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, slot: linux, bundle: appimage }
+          - { os: windows-2025, slot: windows, bundle: nsis }
+          - os: macos-26
+            slot: macos
+            bundle: dmg
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Refuse an existing version or invalid publication request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ inputs.publish }}
+          ACCEPT_OS_SIGNING: ${{ inputs.accept_os_signing_status }}
+        run: |
+          if [[ "$PUBLISH" == true && "$ACCEPT_OS_SIGNING" != true ]]; then
+            echo 'Publishing requires acknowledging current macOS and Windows OS signing status.'
+            exit 1
+          fi
+          node --test .github/scripts/fork-stable-release.test.mjs
+          node .github/scripts/fork-stable-release.mjs preflight
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.targets }}
+      - name: Install Linux bundling dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf build-essential libssl-dev file
+      - uses: ./.github/actions/pin-linuxdeploy
+        if: runner.os == 'Linux'
+      - run: pnpm install --frozen-lockfile
+      - name: Build pinned fork stable installer and updater signature
+        shell: bash
+        env:
+          SLOT: ${{ matrix.slot }}
+          BUNDLE: ${{ matrix.bundle }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.FORK_STABLE_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.FORK_STABLE_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GITDESKTOP_FORK_STABLE: '1'
+          VITE_GITDESKTOP_FORK_STABLE: '1'
+        run: |
+          set -euo pipefail
+          node .github/scripts/fork-stable-release.mjs config "$SLOT"
+          args=()
+          if [[ "$SLOT" == macos ]]; then args+=(--target universal-apple-darwin); fi
+          pnpm tauri build --bundles "$BUNDLE" "${args[@]}" --config "$RUNNER_TEMP/fork-stable-config.json"
+          if [[ "$SLOT" == macos ]]; then
+            shopt -s nullglob
+            images=(src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+            test "${#images[@]}" -eq 1
+            hdiutil verify "${images[0]}"
+            mountpoint=$(mktemp -d "$RUNNER_TEMP/fork-stable-mac.XXXXXX")
+            trap 'hdiutil detach "$mountpoint" >/dev/null' EXIT
+            hdiutil attach "${images[0]}" -readonly -nobrowse -mountpoint "$mountpoint"
+            apps=("$mountpoint"/*.app)
+            test "${#apps[@]}" -eq 1
+            plist="${apps[0]}/Contents/Info.plist"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$FORK_STABLE_VERSION"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = 'io.github.flowforever.gitdesktop'
+            lipo "${apps[0]}/Contents/MacOS/gitdesktop-flowforever" -verify_arch x86_64 arm64
+            hdiutil detach "$mountpoint"
+            trap - EXIT
+            rmdir "$mountpoint"
+            pnpm tauri signer sign --app-version "$FORK_STABLE_VERSION" "${images[0]}"
+          fi
+      - name: Verify Linux package
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/appimage-guard.sh
+      - name: Collect exact installer and signature
+        run: node .github/scripts/fork-stable-release.mjs collect ${{ matrix.slot }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fork-stable-${{ github.run_attempt }}-${{ matrix.slot }}
+          path: ${{ runner.temp }}/fork-stable-part/
+          if-no-files-found: error
+          retention-days: 7
+
+  validate:
+    needs: bundle
+    if: github.repository == 'flowforever/GitDesktop' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: fork-stable-${{ github.run_attempt }}-*
+          path: stable-parts
+      - run: node .github/scripts/fork-stable-release.mjs validate stable-parts stable-assets
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fork-stable-candidate-${{ github.run_attempt }}
+          path: stable-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: validate
+    if: >-
+      github.repository == 'flowforever/GitDesktop' &&
+      github.ref == 'refs/heads/master' &&
+      inputs.publish && inputs.accept_os_signing_status
+    environment: fork-stable-publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: fork-stable-candidate-${{ github.run_attempt }}
+          path: stable-assets
+      - run: node .github/scripts/fork-stable-release.mjs publish stable-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORK_STABLE_PUBLISH: ${{ inputs.publish }}
+          FORK_STABLE_ACCEPT_OS_SIGNING: ${{ inputs.accept_os_signing_status }}

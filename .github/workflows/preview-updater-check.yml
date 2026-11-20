@@ -5,6 +5,9 @@ on:
     branches: [master]
     paths:
       - ".github/PREVIEW-UPDATES.md"
+      - ".github/FORK-STABLE-RELEASE.md"
+      - ".github/scripts/fork-stable-release*.mjs"
+      - ".github/workflows/fork-stable-release.yml"
       - ".github/scripts/check-preview-signature.sh"
       - ".github/scripts/check-preview-macos-dmg.sh"
       - ".github/scripts/preview-macos-fixture-feed.mjs"
@@ -50,6 +53,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Verify monotonic versioning
         run: node --test .github/scripts/preview-config.test.mjs .github/scripts/preview-release.test.mjs
+      - name: Verify fork stable release gates and channel isolation
+        run: node --test .github/scripts/fork-stable-release.test.mjs
       - name: Verify launch notice, consent and stable isolation
         run: pnpm exec vitest run src/test/preview-update.test.tsx src/test/app-update-removal.test.tsx
       - name: Verify genuine Tauri signatures with a disposable key

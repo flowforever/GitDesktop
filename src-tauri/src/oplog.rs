@@ -46,7 +46,7 @@ use serde_json::{Map, Value};
 use crate::error::{AppError, AppResult};
 
 /// The Tauri bundle identifier — the app-data subdir the store writes under.
-const APP_IDENTIFIER: &str = "com.thebguy.gitdesktop";
+use crate::app_identity::APP_IDENTIFIER;
 /// The store filename.
 const STORE_FILE: &str = "opslog.json";
 /// Keep at most this many entries per repo (never evicting a `"pending"` or

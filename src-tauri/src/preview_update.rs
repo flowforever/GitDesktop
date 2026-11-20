@@ -27,12 +27,16 @@ mod macos {
         process::Command,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
+    use crate::app_identity::FORK_STABLE_IDENTIFIER;
     use tauri::{AppHandle, Runtime, Url};
     use tauri_plugin_updater::{UpdaterBuilder, UpdaterExt};
 
     const PRODUCTION: &str = "com.thebguy.gitdesktop.preview";
     const STAGING: &str = "com.thebguy.gitdesktop.preview.staging";
     const FILE: &str = "GitDesktop-Preview-macos-universal.dmg";
+    const FORK_ENDPOINT: &str =
+        "https://github.com/flowforever/GitDesktop/releases/latest/download/fork-stable.json";
+    const FORK_FILE: &str = "GitDesktop-Flowforever-macos-universal.dmg";
 
     fn expected_asset(identifier: &str, configured_endpoint: &str, asset: &Url, version: &str) -> bool {
         if asset.scheme() != "https"
@@ -42,6 +46,12 @@ mod macos {
             || asset.fragment().is_some()
         {
             return false;
+        }
+        if identifier == FORK_STABLE_IDENTIFIER {
+            return configured_endpoint == FORK_ENDPOINT
+                && asset.as_str() == format!(
+                    "https://github.com/flowforever/GitDesktop/releases/download/fork-v{version}/{FORK_FILE}"
+                );
         }
         if identifier == PRODUCTION {
             return asset.as_str() == format!(
@@ -115,8 +125,8 @@ mod macos {
         version: &str,
     ) -> Result<tempfile::NamedTempFile, String> {
         let config = app.config();
-        if config.identifier != PRODUCTION && config.identifier != STAGING {
-            return Err("Only GitDesktop Preview can open this update.".into());
+        if ![PRODUCTION, STAGING, FORK_STABLE_IDENTIFIER].contains(&config.identifier.as_str()) {
+            return Err("This build cannot open a signed disk image update.".into());
         }
         let updater = config
             .plugins
@@ -157,7 +167,12 @@ mod macos {
             .as_secs();
         // reqwest does not set a browser's quarantine metadata. Preserve
         // normal Gatekeeper checks instead of silently bypassing them.
-        let quarantine = format!("0081;{timestamp:x};GitDesktop Preview;");
+        let product = if config.identifier == FORK_STABLE_IDENTIFIER {
+            "GitDesktop Flowforever"
+        } else {
+            "GitDesktop Preview"
+        };
+        let quarantine = format!("0081;{timestamp:x};{product};");
         let status = Command::new("/usr/bin/xattr")
             .args(["-w", "com.apple.quarantine", &quarantine])
             .arg(path)
@@ -293,6 +308,15 @@ mod macos {
             ] {
                 assert!(!expected_asset(PRODUCTION, "", &Url::parse(&bad).unwrap(), "1.2.3"));
             }
+        }
+
+        #[test]
+        fn fork_stable_requires_its_own_feed_version_and_filename() {
+            let url = Url::parse("https://github.com/flowforever/GitDesktop/releases/download/fork-v0.15.0/GitDesktop-Flowforever-macos-universal.dmg").unwrap();
+            assert!(expected_asset(FORK_STABLE_IDENTIFIER, FORK_ENDPOINT, &url, "0.15.0"));
+            assert!(!expected_asset(FORK_STABLE_IDENTIFIER, FORK_ENDPOINT, &url, "0.15.1"));
+            assert!(!expected_asset(FORK_STABLE_IDENTIFIER, "https://other.example/manifest.json", &url, "0.15.0"));
+            assert!(!expected_asset(PRODUCTION, FORK_ENDPOINT, &url, "0.15.0"));
         }
 
         #[test]
