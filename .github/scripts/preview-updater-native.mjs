@@ -147,7 +147,7 @@ const appVersion = (session) =>
     args: [],
   });
 const updateRegion =
-  'document.querySelector(\'section[aria-label="GitDesktop Preview update"]\')';
+  'document.querySelector(\'[role="dialog"][aria-label="GitDesktop Preview update"]\')';
 const updateText = (session) =>
   execute(session, `return ${updateRegion}?.textContent ?? "";`);
 const hash = (...parts) =>
@@ -188,7 +188,7 @@ async function testSeed() {
   await stage("accept update and verify replacement bytes", async () => {
     const result = await webdriver("POST", `/session/${session}/element`, {
       using: "xpath",
-      value: '//section[@aria-label="GitDesktop Preview update"]//button[normalize-space()="Download and install"]',
+      value: '//*[@role="dialog" and @aria-label="GitDesktop Preview update"]//button[normalize-space()="Download update"]',
     });
     const button = result["element-6066-11e4-a52e-4f735466cecf"];
     assert.ok(button);

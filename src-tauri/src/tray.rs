@@ -142,7 +142,7 @@ fn exit_now(app: &AppHandle) {
 /// the webview's memory, so the request shows the window and asks there instead
 /// (the rule is [`crate::state::quit_decision`]). Returns whether the app is
 /// exiting.
-fn request_quit(app: &AppHandle) -> bool {
+pub(crate) fn request_quit(app: &AppHandle) -> bool {
     match app.state::<AppState>().begin_quit(monotonic_ms()) {
         QuitDecision::Exit => {
             exit_now(app);

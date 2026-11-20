@@ -54,10 +54,13 @@ check. The stable application and its release workflow are unchanged.
 - Start with two signed **preview** builds, A and B, with increasing embedded
   versions. Install A manually while its feed offers A only; launch and
   confirm there is no prompt. Publish B to staging and relaunch A. Confirm the
-  prompt shows B and does not start a download until the user accepts.
+  dialog shows B. Choose Later and confirm it stays closed without downloading.
+  Choose Check for updates to reopen it, then Download update.
 - Accept and verify the running app reports B after installation and restart.
-  On macOS first confirm only the signed DMG opens and A remains installed
-  until the user finishes replacing it, with normal Gatekeeper behavior.
+  On macOS confirm the verified DMG opens before GitDesktop Preview quits,
+  and A remains installed until the user finishes replacing it in Applications.
+  Keep normal Gatekeeper behavior. A failed download or open must leave A running;
+  if writes are parked offline, the normal quit confirmation still applies.
   Launch again and confirm it no longer offers B. Test each supported
   platform/architecture, including both macOS architectures for the universal
   bundle. Verify any earlier unsigned preview requires a new signed seed and

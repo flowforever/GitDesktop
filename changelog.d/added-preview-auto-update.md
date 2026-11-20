@@ -1,3 +1,4 @@
-- **Signed preview updates.** GitDesktop Preview can check for a new version on
-  startup and only downloads it when you choose. On macOS it opens a verified
-  disk image for you to finish installing. The stable build is unchanged.
+- Signed Preview builds show available updates in a dialog with Download update
+  and Later. On macOS, an accepted update opens the verified disk image before
+  requesting a normal quit so you can replace the app in Applications. Stable
+  builds are unchanged.

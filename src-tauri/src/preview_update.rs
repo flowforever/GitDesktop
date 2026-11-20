@@ -1,12 +1,13 @@
 // The macOS Preview distribution mirrors MDE's consent-and-open flow, but
 // never opens a disk image until the Tauri updater verifies its signature
-// and signed version. The actual installation is left to Finder and the user.
+// and signed version. After opening it, the app requests its normal guarded
+// quit so the user can replace the preview in Finder.
 
 #[tauri::command]
 pub async fn preview_open_signed_dmg(
     app: tauri::AppHandle,
     expected_version: String,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         macos::download_and_open(app, &expected_version).await
@@ -21,12 +22,12 @@ pub async fn preview_open_signed_dmg(
 #[cfg(target_os = "macos")]
 mod macos {
     use std::{
+        future::Future,
         io::Write,
         process::Command,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
     use tauri::{AppHandle, Runtime, Url};
-    use tauri_plugin_opener::OpenerExt;
     use tauri_plugin_updater::{UpdaterBuilder, UpdaterExt};
 
     const PRODUCTION: &str = "com.thebguy.gitdesktop.preview";
@@ -53,7 +54,10 @@ mod macos {
             && asset.path_segments().and_then(|mut segments| segments.next_back()) == Some(FILE)
     }
 
-    pub(super) async fn download_and_open(app: tauri::AppHandle, version: &str) -> Result<(), String> {
+    pub(super) async fn download_and_open(
+        app: tauri::AppHandle,
+        version: &str,
+    ) -> Result<bool, String> {
         let builder = app
             .updater_builder()
             .timeout(Duration::from_secs(120))
@@ -61,12 +65,48 @@ mod macos {
             // across redirects as well as for the original URL.
             .configure_client(|client| client.https_only(true));
         let disk_image = prepare_disk_image(&app, builder, version).await?;
-        app.opener()
-            .open_path(disk_image.path().to_string_lossy().into_owned(), None::<&str>)
-            .map_err(|e| e.to_string())?;
-        // Launch Services and Finder use the file after the command returns.
-        disk_image.keep().map_err(|e| e.error.to_string())?;
-        Ok(())
+        quit_after_open(
+            async move {
+                // The opener plugin detaches after spawning open, not after its
+                // exit status. Wait for Launch Services to accept the DMG before
+                // allowing GitDesktop to quit.
+                let status = tokio::process::Command::new("/usr/bin/open")
+                    .arg(disk_image.path())
+                    .status()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                if !status.success() {
+                    return Err("macOS could not open the preview disk image.".into());
+                }
+                // Finder needs the file after this process exits.
+                disk_image.keep().map_err(|e| e.error.to_string())?;
+                Ok(())
+            },
+            || request_guarded_quit(&app),
+        )
+        .await
+    }
+
+    async fn quit_after_open<F: Future<Output = bool>>(
+        open: impl Future<Output = Result<(), String>>,
+        request_quit: impl FnOnce() -> F,
+    ) -> Result<bool, String> {
+        open.await?;
+        Ok(request_quit().await)
+    }
+
+    async fn request_guarded_quit(app: &tauri::AppHandle) -> bool {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let handle = app.clone();
+        if app
+            .run_on_main_thread(move || {
+                let _ = send.send(crate::tray::request_quit(&handle));
+            })
+            .is_err()
+        {
+            return false;
+        }
+        receive.await.unwrap_or(false)
     }
 
     async fn prepare_disk_image<R: Runtime>(
@@ -132,6 +172,36 @@ mod macos {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[tokio::test]
+        async fn opens_before_requesting_guarded_quit() {
+            let opened = std::cell::Cell::new(false);
+            for quitting in [true, false] {
+                opened.set(false);
+                let result = quit_after_open(
+                    async {
+                        opened.set(true);
+                        Ok(())
+                    },
+                    || async {
+                        assert!(opened.get(), "launch the disk image before quitting");
+                        quitting
+                    },
+                )
+                .await;
+                assert_eq!(result, Ok(quitting));
+            }
+        }
+
+        #[tokio::test]
+        async fn failed_disk_image_open_does_not_request_quit() {
+            let result = quit_after_open(
+                async { Err("Launch Services error".into()) },
+                || async { panic!("failed disk image open must not quit") },
+            )
+            .await;
+            assert_eq!(result, Err("Launch Services error".into()));
+        }
 
         #[tokio::test]
         #[ignore = "requires disposable signed DMG, key and local HTTPS fixture from Actions"]
