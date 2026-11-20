@@ -1,0 +1,1 @@
+- Added a separately installed GitDesktop Flowforever stable channel with signed updates.

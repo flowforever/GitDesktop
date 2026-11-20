@@ -1,5 +1,6 @@
 mod agent;
 mod agent_sandbox;
+mod app_identity;
 mod app_menu;
 mod app_store;
 mod attachments;

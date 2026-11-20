@@ -198,6 +198,30 @@ describe("signed preview updates", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
+  it("allows only the separate fork stable app in fork stable mode", async () => {
+    isTauri.mockReturnValue(true);
+    getIdentifier.mockResolvedValueOnce("com.thebguy.gitdesktop.preview");
+    const preview = render(<PreviewUpdateNotice forkStable />);
+    await waitFor(() => expect(getIdentifier).toHaveBeenCalledOnce());
+    expect(check).not.toHaveBeenCalled();
+    preview.unmount();
+
+    getIdentifier.mockResolvedValue("io.github.flowforever.gitdesktop");
+    check.mockResolvedValue({
+      version: "0.15.1",
+      downloadAndInstall: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    });
+    render(<PreviewUpdateNotice forkStable />);
+    const dialog = await screen.findByRole("dialog", {
+      name: "GitDesktop Flowforever update",
+    });
+    expect(
+      within(dialog).getByText("GitDesktop Flowforever 0.15.1 is available."),
+    ).toBeVisible();
+    expect(check).toHaveBeenCalledOnce();
+  });
+
   it("never checks in a browser", () => {
     isTauri.mockReturnValue(false);
     render(<PreviewUpdateNotice />);
