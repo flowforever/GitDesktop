@@ -60,6 +60,18 @@ jobs:
       - name: Verify genuine Tauri signatures with a disposable key
         run: bash .github/scripts/check-preview-signature.sh
 
+  windows-fork-release-policy:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: node --test .github/scripts/fork-stable-release.test.mjs
+
   signed-macos-dmg-fixture:
     runs-on: macos-26
     timeout-minutes: 30

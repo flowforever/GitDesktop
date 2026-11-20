@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   compareVersions, configFor, endpoint, identifier, manifestFor, nextRelease,
 } from "./fork-stable-release.mjs";
@@ -51,9 +52,9 @@ test("manifest binds every platform to an immutable fork-version tag", () => {
 });
 
 test("publish CLI rejects any run without explicit publication and OS disclosure", () => {
-  const script = new URL("./fork-stable-release.mjs", import.meta.url);
+  const script = fileURLToPath(new URL("./fork-stable-release.mjs", import.meta.url));
   for (const [publish, ack] of [["false", "true"], ["true", "false"]]) {
-    const result = spawnSync(process.execPath, [decodeURIComponent(script.pathname), "publish", "/not-used"], {
+    const result = spawnSync(process.execPath, [script, "publish", "/not-used"], {
       encoding: "utf8",
       env: { ...process.env, FORK_STABLE_PUBLISH: publish, FORK_STABLE_ACCEPT_OS_SIGNING: ack },
     });
@@ -64,8 +65,8 @@ test("publish CLI rejects any run without explicit publication and OS disclosure
 });
 
 test("installer config fails closed before building when the protected key is missing", () => {
-  const script = new URL("./fork-stable-release.mjs", import.meta.url);
-  const result = spawnSync(process.execPath, [decodeURIComponent(script.pathname), "config", "macos"], {
+  const script = fileURLToPath(new URL("./fork-stable-release.mjs", import.meta.url));
+  const result = spawnSync(process.execPath, [script, "config", "macos"], {
     encoding: "utf8",
     env: {
       ...process.env,

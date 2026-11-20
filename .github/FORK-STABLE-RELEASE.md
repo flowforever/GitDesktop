@@ -50,8 +50,15 @@ these OS-signing limitations, dispatch the same version with `publish=true` and
 job. It will rebuild and verify the same code, upload and check a draft, and
 only then publish it. Do not publish a draft manually or substitute a personal
 access token: the workflow's built-in token stops GitHub from running inherited
-release-event workflows that belong to upstream. The first stable build is installed manually; future
-versions are offered through its separate update feed. On macOS a verified
-installer is opened before the app requests a guarded quit, so the user can
-replace the app. On Windows and Linux the updater installs it and asks the
+release-event workflows that belong to upstream. The first stable build is
+installed manually; future versions are offered through its separate update
+feed. On macOS a verified installer is opened before the app requests a guarded
+quit, so the user can replace the app. On Windows and Linux the updater installs it and asks the
 user to restart.
+
+## Recover from a failed run
+
+Use **Re-run all jobs** if the run still points at the tip of `master`, or
+dispatch a fresh run if `master` moved. A failed-jobs-only rerun cannot collect
+all artifacts from one attempt. If publishing failed after creating a draft,
+check the release and tag state before any retry; do not manually publish it.
