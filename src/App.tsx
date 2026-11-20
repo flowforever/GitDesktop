@@ -25,6 +25,7 @@ import { usePickAndOpenRepo } from "@/features/repository/useOpenRepoByPath";
 import { SettingsScreen } from "@/features/settings/SettingsScreen";
 import { CommandPalette } from "@/features/shortcuts/CommandPalette";
 import { ShortcutsDialog } from "@/features/shortcuts/ShortcutsDialog";
+import { PreviewUpdateNotice } from "@/features/updates/PreviewUpdateNotice";
 import { WhatsNew } from "@/features/updates/WhatsNew";
 import { CloneRepoDialog } from "@/features/welcome/CloneRepoDialog";
 import { CreateRepoDialog } from "@/features/welcome/CreateRepoDialog";
@@ -374,6 +375,9 @@ function App() {
           scrollbar, and the root never becomes a scroll container that a focus
           or scrollIntoView could shift with no scrollbar to undo it. */}
       <div className="flex h-screen flex-col overflow-clip">
+        {import.meta.env.VITE_GITDESKTOP_PREVIEW_UPDATES === "1" && (
+          <PreviewUpdateNotice />
+        )}
         {workTabsVisible && <WorkDocumentBar />}
         {view === "welcome" && (
           <div

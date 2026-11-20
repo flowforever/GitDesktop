@@ -1,0 +1,165 @@
+# GitDesktop Preview updates
+
+The push build produces 14-day Actions artifacts for macOS (universal DMG),
+Windows (NSIS) and Linux (AppImage). It does **not** publish releases. These
+test builds have no update endpoint, no updater signatures and no startup
+check. The stable application and its release workflow are unchanged.
+
+## Set up signed distribution (not enabled)
+
+1. In the fork, reserve a protected GitHub environment named `preview-release`
+   for trusted `master` builds only. Generate a **new preview-only** Tauri
+   keypair via `pnpm tauri signer generate --write-keys <protected-path>` on a
+   trusted machine. Make an offline recovery copy. Store the private key and
+   its password in that environment as `TAURI_SIGNING_PRIVATE_KEY` and
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (the names consumed by Tauri). Put only
+   the public key in a proposed `GITDESKTOP_PREVIEW_UPDATER_PUBKEY` environment
+   variable. Do not reuse the upstream stable key or expose release secrets
+   to PR or fork jobs.
+2. The protected packaging jobs enable the startup UI, embed the preview
+   public key and feed URL, and require a version-bound signature. Windows
+   builds the signed NSIS payload and Linux the signed AppImage. The macOS
+   leg checks the universal disk image with `hdiutil verify` and signs the
+   DMG separately using `tauri signer sign --app-version`. Both macOS
+   architecture entries use the same DMG.
+3. macOS follows MDE's download-and-open flow: once the user clicks, the
+   native command rechecks the offer, validates the precise version and
+   allowed HTTPS destination, verifies the DMG bytes and signed version,
+   adds macOS quarantine metadata, and opens the DMG. The user quits
+   GitDesktop Preview and replaces it in Applications. No Apple ID,
+   Apple certificate, or notarization credentials are required for this
+   ad hoc signed build. It is not Apple-notarized and Gatekeeper may warn
+   or block the app. This flow does not skip Gatekeeper, trust a certificate,
+   or install the app on the user's behalf. Tauri updater signatures are
+   separate from Apple signing and Windows Authenticode.
+4. On approved publication, keep immutable, versioned updater payloads in
+   GitHub prereleases (for example, tags `preview-<version>`, not `v*`).
+   Point preview clients to one fixed HTTPS manifest, e.g.
+   `https://github.com/flowforever/GitDesktop/releases/download/preview-channel/latest.json`
+   from a separate rolling **prerelease**. Do not use
+   `releases/latest/download/latest.json`; that is the stable channel.
+   A trusted HTTPS static host for the same manifest is also suitable.
+   GitHub Actions artifact URLs expire and are not an updater feed.
+5. Give only the protected publisher job `contents: write` if using Releases.
+   Publish the complete platform matrix before moving the manifest. Confirm
+   its version equals the signed version and each target/architecture points
+   to the intended immutable payload and signature. Serialize changes to the
+   feed and refuse to move backwards on old build retries. A public feed and
+   assets are readable by anyone; do not enable them without agreement on
+   distribution. Do not embed a GitHub access token in the app. Publish
+   privately only with a separately designed authenticated service.
+
+## Gate before enabling
+
+- Start with two signed **preview** builds, A and B, with increasing embedded
+  versions. Install A manually while its feed offers A only; launch and
+  confirm there is no prompt. Publish B to staging and relaunch A. Confirm the
+  dialog shows B. Choose Later and confirm it stays closed without downloading.
+  Choose Check for updates to reopen it, then Download update.
+- Accept and verify the running app reports B after installation and restart.
+  On macOS confirm the verified DMG opens before GitDesktop Preview quits,
+  and A remains installed until the user finishes replacing it in Applications.
+  Keep normal Gatekeeper behavior. A failed download or open must leave A running;
+  if writes are parked offline, the normal quit confirmation still applies.
+  Launch again and confirm it no longer offers B. Test each supported
+  platform/architecture, including both macOS architectures for the universal
+  bundle. Verify any earlier unsigned preview requires a new signed seed and
+  that the stable application remains unaffected.
+- Test same or older versions, missing entries, an unreachable feed, a wrong
+  signature, tampered bytes, and a manifest version greater than the version
+  embedded in a valid signature. Verify none install an update. Test declining
+  the prompt and retry after download failure. Require gate success before the
+  first production feed publication.
+
+## CI without release secrets
+
+The read-only `preview-updater-check` workflow runs focused UI/consent and
+version tests, then `bash .github/scripts/check-preview-signature.sh`. The
+script generates an ephemeral test key, uses the real Tauri signer to sign
+small synthetic payloads, and deletes the key without uploading anything.
+The offline Rust fixture uses the same minisign verification dependency and
+signed-version field as the updater. It rejects same/older, wrong-key,
+tampered, unversioned and mislabelled payloads. This proves the signed
+payload/manifest contract, not the actual native install/restart path.
+The PR-only `preview-updater-native` job is the separate Linux AppImage
+acceptance test. It builds two actual signed packages, serves B via HTTPS on
+`127.0.0.1`, then uses the official Tauri/WebKit WebDriver under Xvfb to launch
+A, verify that the prompt downloads nothing until clicked, accept it,
+checksum the installed AppImage against B, and verify B on relaunch. Linux
+rustls uses a disposable CA via `SSL_CERT_FILE` only in the app subprocess;
+host trust and TLS verification are not changed. The scripts do not publish
+packages or retain keys. A passing run is required before treating Linux
+native installation as verified; macOS and Windows need their own signed
+acceptance runs.
+
+See [Tauri updater](https://v2.tauri.app/plugin/updater/) and
+[macOS signing](https://v2.tauri.app/distribute/sign/macos/).
+
+## Enabling the implemented workflow
+
+`signed-preview.yml` is default-off. The unsigned `push-preview.yml` and
+stable `v*` releases do not read these settings.
+
+| Gate | GitHub settings |
+| --- | --- |
+| Staging (optional; keep production off) | Protect branch `ci/preview-staging`, deploy only that branch to environment `preview-staging`, and set repository variable `GITDESKTOP_PREVIEW_STAGING_ENABLED=true`. Set the environment variable `GITDESKTOP_PREVIEW_STAGING_ENDPOINT` to a distinct test HTTPS manifest URL with a normally trusted certificate. |
+| Production (after sign-off) | Protect `master`, deploy only that branch to environment `preview-release`, and set repository variable `GITDESKTOP_PREVIEW_PRODUCTION_ENABLED=true` **last**. A `master` push then publishes automatically after every signed platform succeeds. Environment protection can require review if a human release gate is desired. |
+| Both environments | Add each channel's own `GITDESKTOP_PREVIEW_UPDATER_PUBKEY` variable, `TAURI_SIGNING_PRIVATE_KEY` and, if set, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets, with no Apple credentials. Staging uses a disposable/never-production Tauri key and separate app ID. |
+
+Do not stage via unreviewed PR or fork code. Push the reviewed commit to the
+protected staging branch (production still off) to build A; push a second
+reviewed commit there to build B. No release is created on this branch.
+The three Actions artifacts are **not confidential** in this public
+repository: GitHub users with access can download them. Do not embed secrets,
+customer data or a credential in an endpoint URL. Only the test public key
+and trusted staging URL are compiled into the app.
+
+Download A and B from their Actions runs. To exercise native Windows and
+macOS, install A on clean test machines for each platform and architecture.
+Host B's normalized updater files at the test HTTPS endpoint, with the raw
+contents of the adjacent `.sig` files in the corresponding JSON platform
+entries. The production manifest generator in `.github/scripts/preview-release.mjs`
+lists the exact platform keys; point those entries at the staging payloads,
+not production GitHub Releases. Use the B version from `build.json` and the
+same version-signed universal DMG for both macOS architectures. Follow the two-version
+gate above, including the before-consent check and relaunch. Tauri has no
+official macOS desktop WebDriver, and the Linux process-local root fixture
+does not apply to Windows platform trust; this workflow does not claim
+either native upgrade has passed. A separate macOS Actions job builds and
+checks a real disposable DMG, verifies tamper and signed-version rejection
+without Apple credentials, and compiles/tests the native URL allowlist.
+The macOS job also serves the ephemeral fixture over loopback HTTPS and
+runs the production DMG preparation code with an isolated test client
+trusting only the fixture CA. It rejects default-system-trust, forged
+versions and tampered download bytes, and confirms the valid downloaded
+DMG is quarantined and mounts read-only via `hdiutil`. There is no test
+switch or fixture CA in shipped builds, and no system trust change.
+This is not a Finder installation or Gatekeeper approval test.
+
+The read-only `preview-updater-windows` workflow builds two real GitDesktop
+NSIS bundles with a disposable bundle ID and fixture signing key, then
+installs A per-user under the fresh GitHub-hosted runner's temporary directory.
+A test-only Rust child uses a client-local fixture CA, checks and verifies B,
+and calls genuine Tauri NSIS installation. The supervisor checks no early
+download, exact on-disk A and B hashes, and that the installed B launches and
+opens its window. No fixture trust is compiled into the bundles or installed
+into Windows. This tests download, native replacement and relaunch; UI consent
+is covered by the separate mocked UI test, and release-binary HTTPS/normal
+SmartScreen behavior still require staging. A real Actions pass is required
+before calling this Windows native flow verified.
+
+Production creates a new `preview-<version>` **prerelease** with immutable
+by-policy asset names and SHA-256 checks; existing published versioned assets
+are never overwritten. The runner updates only the `latest.json` asset on
+the separate `preview-channel` prerelease, and never makes a prerelease
+GitHub's latest stable release. If repository-wide immutable releases stop
+replacing the rolling asset, use a separate approved HTTPS feed instead;
+do not turn off repository security settings to make it work.
+
+GitHub's replacement of the rolling asset can briefly return 404. If that
+step fails, the newest versioned prerelease still contains its validated
+`latest.json`. Repair using that newest manifest, never an older one. The
+publisher checks the newest **published versioned** prerelease before
+promoting, even if the rolling feed is temporarily missing. Rerun **all**
+matrix jobs together after a failed attempt; mixing artifacts from separate
+attempts is rejected.

@@ -15,6 +15,11 @@ license = "Apache-2.0"
 name = "gitdesktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[workspace]
+members = ["ci/windows-updater-driver"]
+default-members = ["."]
+resolver = "2"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -74,6 +79,11 @@ dunce = "1"
 # Desktop-only: the updater plugin doesn't build for mobile.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+# The Mac acceptance test uses an ephemeral, client-local HTTPS root.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+reqwest = { version = "0.13.4", default-features = false }
 
 # Windows-only: re-read the live user/system PATH from the registry so the CLI
 # resolver can find a tool added to PATH AFTER the app launched (Windows never

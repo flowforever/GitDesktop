@@ -1595,6 +1595,7 @@ dependencies = [
  "libc",
  "os_info",
  "portable-pty",
+ "reqwest 0.13.4",
  "rmcp",
  "serde",
  "serde-saphyr",
@@ -1619,6 +1620,17 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "winreg 0.56.0",
+]
+
+[[package]]
+name = "gitdesktop-windows-updater-driver"
+version = "0.0.0"
+dependencies = [
+ "reqwest 0.13.4",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-updater",
+ "tokio",
 ]
 
 [[package]]

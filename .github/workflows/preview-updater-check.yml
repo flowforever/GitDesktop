@@ -1,0 +1,82 @@
+name: preview-updater-check
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/PREVIEW-UPDATES.md"
+      - ".github/scripts/check-preview-signature.sh"
+      - ".github/scripts/check-preview-macos-dmg.sh"
+      - ".github/scripts/preview-macos-fixture-feed.mjs"
+      - ".github/scripts/preview-config*.mjs"
+      - ".github/scripts/preview-release*.mjs"
+      - ".github/workflows/signed-preview.yml"
+      - ".github/test-fixtures/preview-signature/**"
+      - ".github/workflows/preview-updater-check.yml"
+      - ".github/workflows/push-preview.yml"
+      - "src/App.tsx"
+      - "src/features/updates/**"
+      - "src/test/preview-update.test.tsx"
+      - "src/test/app-update-removal.test.tsx"
+      - "src-tauri/tauri.conf.json"
+      - "src-tauri/src/preview_update.rs"
+      - "src-tauri/src/lib.rs"
+      - "src-tauri/capabilities/**"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - ".node-version"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-preview-updater:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6.1.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify monotonic versioning
+        run: node --test .github/scripts/preview-config.test.mjs .github/scripts/preview-release.test.mjs
+      - name: Verify launch notice, consent and stable isolation
+        run: pnpm exec vitest run src/test/preview-update.test.tsx src/test/app-update-removal.test.tsx
+      - name: Verify genuine Tauri signatures with a disposable key
+        run: bash .github/scripts/check-preview-signature.sh
+
+  signed-macos-dmg-fixture:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6.1.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          save-if: false
+      - run: pnpm install --frozen-lockfile
+      - name: Compile and test the native DMG URL allowlist
+        run: |
+          mkdir -p dist
+          printf '<!doctype html><title>Native unit tests</title>' > dist/index.html
+          cargo test --locked --manifest-path src-tauri/Cargo.toml preview_update::macos::tests
+      - name: Download, verify, quarantine and mount a real DMG without Apple credentials
+        run: bash .github/scripts/check-preview-macos-dmg.sh

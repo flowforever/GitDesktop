@@ -1,0 +1,105 @@
+name: push-preview
+
+# Like MDE's release workflow, builds platform installers in Actions. Unlike a
+# tagged release, these on-push snapshots are test artifacts, not updates.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/push-preview.yml"
+      - ".github/scripts/preview-config.mjs"
+      - ".github/scripts/preview-config.test.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    if: github.repository == 'flowforever/GitDesktop'
+    name: Preview installer (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-26
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+            bundle: dmg
+            path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          - platform: windows-2025
+            bundle: nsis
+            path: src-tauri/target/release/bundle/nsis/*.exe
+          - platform: ubuntu-24.04
+            bundle: appimage
+            path: src-tauri/target/release/bundle/appimage/*.AppImage
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6.1.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          # A PR can consume the trusted cache without writing one.
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev \
+            file
+      - name: Pin AppImage tools
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/pin-linuxdeploy
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify preview versioning
+        run: node --test .github/scripts/preview-config.test.mjs
+      - name: Prepare isolated preview version
+        id: preview
+        run: node .github/scripts/preview-config.mjs
+      - name: Build preview installer
+        run: pnpm tauri build --bundles ${{ matrix.bundle }} ${{ matrix.args }} --config "$RUNNER_TEMP/gitdesktop-preview.json"
+        shell: bash
+      - name: Guard the AppImage bundle and its startup environment
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/appimage-guard.sh
+      - name: Verify installer output
+        env:
+          INSTALLER_PATH: ${{ matrix.path }}
+        run: node --input-type=module -e 'import { globSync, statSync } from "node:fs"; const paths = globSync(process.env.INSTALLER_PATH); if (paths.length !== 1 || !statSync(paths[0]).size) throw new Error("Expected exactly one nonempty installer"); console.log(paths[0]);'
+        shell: bash
+      - name: Upload preview
+        uses: actions/upload-artifact@v7
+        with:
+          name: GitDesktop-${{ steps.preview.outputs.version }}-${{ matrix.platform }}
+          path: |
+            ${{ matrix.path }}
+            ${{ runner.temp }}/gitdesktop-preview-build.json
+          if-no-files-found: error
+          retention-days: 14

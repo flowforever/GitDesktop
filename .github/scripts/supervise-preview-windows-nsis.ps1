@@ -1,0 +1,79 @@
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'preview-windows-nsis-common.ps1')
+$fixture = Get-FixturePath
+$install, $exe, $hashA, $hashB = Get-FixturePayload $fixture
+
+Write-Host 'START: isolated, per-user installation of A'
+$start = [Diagnostics.ProcessStartInfo]::new()
+$start.FileName = Join-Path $fixture 'a/setup.exe'
+$start.WorkingDirectory = $fixture
+$start.UseShellExecute = $false
+# NSIS /D must be the final argument and must not be quoted, even if
+# its value contains spaces. Do not let PowerShell rejoin or re-quote it.
+$start.Arguments = "/S /D=$install"
+$seed = [Diagnostics.Process]::new()
+$seed.StartInfo = $start
+try {
+    if (!$seed.Start()) { throw 'Unable to start the A installer.' }
+    Write-Host "Seed installer PID: $($seed.Id); expected path: $exe"
+    if (!$seed.WaitForExit(120000)) {
+        $seed.Kill($true)
+        throw 'A installer did not finish within 120 seconds.'
+    }
+    $seedExit = $seed.ExitCode
+} finally {
+    $seed.Dispose()
+}
+$installedExists = Test-Path -LiteralPath $exe -PathType Leaf
+Write-Host "Seed installer exit: $seedExit; expected executable exists: $installedExists"
+if ($seedExit -ne 0 -or !$installedExists) {
+    if (Test-Path -LiteralPath $install -PathType Container) {
+        $files = @(Get-ChildItem -LiteralPath $install -File -Force | Select-Object -First 20 -ExpandProperty Name)
+        Write-Host "Files at the isolated install path (first 20): $($files -join ', ')"
+    }
+    if ($seedExit -ne 0) { throw "A installer returned exit code $seedExit." }
+    throw "A installer returned success but did not create $exe."
+}
+$installedHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+if ($installedHash -ne $hashA) {
+    throw "A executable hash differs from the independently extracted NSIS payload. Expected $hashA; got $installedHash."
+}
+if ((Get-Content -Raw (Join-Path $fixture 'downloads')).Trim() -ne '0') {
+    throw 'B downloaded before the fixture allowed installation.'
+}
+Write-Host 'PASS: A matches the embedded 1.0.1 executable; B has not downloaded'
+
+$env:GD_WIN_INSTALLED_EXE = $exe
+$env:GD_WIN_INSTALL_DIR = $install
+Write-Host 'START: deliver signed B through native Tauri updater'
+cargo build --release --locked --manifest-path src-tauri/Cargo.toml --package gitdesktop-windows-updater-driver
+if ($LASTEXITCODE -ne 0) { throw "Standalone native updater driver build failed: $LASTEXITCODE" }
+$driverExe = Join-Path $PWD 'src-tauri/target/release/gitdesktop-windows-updater-driver.exe'
+$driverStdout = Join-Path $fixture 'driver.stdout'
+$driverStderr = Join-Path $fixture 'driver.stderr'
+# Tauri uses ShellExecuteW to spawn NSIS, then exits its own process. Wait
+# for the specific driver PID, not cargo run or the installer process tree.
+$driver = Start-Process -FilePath $driverExe -PassThru -NoNewWindow `
+    -RedirectStandardOutput $driverStdout -RedirectStandardError $driverStderr
+try {
+    Write-Host "Driver PID: $($driver.Id)"
+    if (!$driver.WaitForExit(120000)) {
+        $driver.Kill()
+        throw 'Standalone native updater driver did not exit within 120 seconds.'
+    }
+    $driverExit = $driver.ExitCode
+} finally {
+    $driver.Dispose()
+    Get-Content -LiteralPath $driverStdout, $driverStderr
+}
+Write-Host "Standalone native updater driver exit: $driverExit"
+if ($driverExit -ne 0) { throw "Standalone native updater driver failed: $driverExit" }
+if (!(Test-Path -LiteralPath (Join-Path $fixture 'native-update-invoked')) -or
+    (Get-Content -Raw (Join-Path $fixture 'native-update-invoked')).Trim() -ne '1.1.1') {
+    throw 'The native updater driver did not reach native installation.'
+}
+
+if ((Get-Content -Raw (Join-Path $fixture 'downloads')).Trim() -ne '1') {
+    throw 'Expected exactly one signed B download before installer handoff.'
+}
+[IO.File]::WriteAllText((Join-Path $fixture 'native-handoff-completed'), $hashB)
