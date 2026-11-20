@@ -21,21 +21,35 @@ pnpm tauri signer generate --ci --password '' --write-keys "$TAURI_SIGNING_PRIVA
 export GITDESKTOP_PREVIEW_UPDATER_PUBKEY="$(cat "$TAURI_SIGNING_PRIVATE_KEY_PATH.pub")"
 cp "$TAURI_SIGNING_PRIVATE_KEY_PATH.pub" "$out/staging.pub"
 shopt -s nullglob
+# Tauri may remove the intermediate macOS bundle after creating the DMG.
+# Inspect the exact disk image that will be signed, never the build directory.
+inspect_image() (
+  local image="$1" version="$2" mountpoint executable
+  mountpoint=$(mktemp -d "$scratch/dmg-mount.XXXXXX")
+  trap 'hdiutil detach "$mountpoint" >/dev/null' EXIT
+  hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mountpoint"
+  local apps=("$mountpoint"/*.app)
+  test "${#apps[@]}" -eq 1
+  test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${apps[0]}/Contents/Info.plist")" = "$version"
+  executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${apps[0]}/Contents/Info.plist")
+  [[ -n "$executable" && "$executable" != */* ]]
+  lipo -verify_arch x86_64 arm64 "${apps[0]}/Contents/MacOS/$executable"
+  hdiutil detach "$mountpoint"
+  trap - EXIT
+  rmdir "$mountpoint"
+)
+
 build() {
-  local seq="$1" filename="$2" version app
+  local seq="$1" filename="$2" version
   local dir='src-tauri/target/universal-apple-darwin/release/bundle'
   GITHUB_RUN_NUMBER="$seq" GITHUB_RUN_ATTEMPT=1 RUNNER_TEMP="$scratch" GITHUB_OUTPUT="$scratch/out" \
     node .github/scripts/preview-config.mjs
   pnpm tauri build --bundles dmg --target universal-apple-darwin --config "$scratch/gitdesktop-preview.json"
   local images=("$dir"/dmg/*.dmg)
-  local apps=("$dir"/macos/*.app)
   test "${#images[@]}" -eq 1
-  test "${#apps[@]}" -eq 1
   version=$(node -p 'require(process.argv[1]).version' "$scratch/gitdesktop-preview-build.json")
-  test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${apps[0]}/Contents/Info.plist")" = "$version"
-  app=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${apps[0]}/Contents/Info.plist")
-  lipo -verify_arch x86_64 arm64 "${apps[0]}/Contents/MacOS/$app"
   hdiutil verify "${images[0]}"
+  inspect_image "${images[0]}" "$version"
   mv "${images[0]}" "$out/$filename"
   pnpm tauri signer sign --app-version "$version" "$out/$filename"
 }
