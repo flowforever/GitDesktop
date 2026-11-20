@@ -1,0 +1,128 @@
+name: preview-macos-handoff-artifact
+
+# Temporary, artifact-only smoke build. No release, tags, secrets or writes.
+on:
+  push:
+    branches: [ci/preview-mac-artifact-31371e9]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    if: >-
+      github.repository == 'flowforever/GitDesktop' &&
+      github.ref == 'refs/heads/ci/preview-mac-artifact-31371e9' &&
+      github.event_name == 'push'
+    runs-on: macos-26
+    timeout-minutes: 55
+    env:
+      SOURCE_SHA: 31371e96b99e5dd38eced7fe9519607b0026d9c0
+      B_SHA256: d6a77b1e8cded20fb42adcf58420fc7c806531cc8cfbf3461120b26ba5099869
+      GITDESKTOP_PREVIEW_SIGNING_CHANNEL: staging
+      GITDESKTOP_PREVIEW_STAGING_ENDPOINT: https://github.com/flowforever/GitDesktop/releases/download/preview-mac-stage-44679026598-1/latest.json
+      VITE_GITDESKTOP_PREVIEW_UPDATES: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 31371e96b99e5dd38eced7fe9519607b0026d9c0
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          repository: flowforever/GitDesktop
+          run-id: 44679026598
+          artifact-ids: 14605930060
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+          merge-multiple: true
+          path: ${{ runner.temp }}/existing-public-staging
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify existing public B and build exact-head A
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PATH TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          prior="$RUNNER_TEMP/existing-public-staging"
+          payload="$prior/GitDesktop-Preview-macos-universal.dmg"
+          signature="$payload.sig"
+          for file in "$prior/staging.pub" "$payload" "$signature"; do
+            test -f "$file"
+            test ! -L "$file"
+          done
+          test "$(shasum -a 256 "$payload" | cut -d ' ' -f 1)" = "$B_SHA256"
+          feed="$RUNNER_TEMP/verified-existing-b.json"
+          curl --fail --silent --show-error --location --proto '=https' \
+            --proto-redir '=https' --retry 3 --max-time 30 \
+            "$GITDESKTOP_PREVIEW_STAGING_ENDPOINT" -o "$feed"
+          node --input-type=module - "$feed" "$signature" <<'JS'
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+          const feed = JSON.parse(readFileSync(process.argv[2], "utf8"));
+          const expectedSig = readFileSync(process.argv[3], "utf8").trim();
+          const expectedUrl = new URL("GitDesktop-Preview-macos-universal.dmg",
+            process.env.GITDESKTOP_PREVIEW_STAGING_ENDPOINT).href;
+          assert.equal(feed.version, "1.1.1");
+          for (const target of ["darwin-aarch64", "darwin-aarch64-app", "darwin-x86_64", "darwin-x86_64-app"]) {
+            assert.equal(feed.platforms[target].url, expectedUrl);
+            assert.equal(feed.platforms[target].signature, expectedSig);
+          }
+          JS
+          export GITDESKTOP_PREVIEW_UPDATER_PUBKEY="$(cat "$prior/staging.pub")"
+          cargo run --locked --quiet --manifest-path .github/test-fixtures/preview-signature/Cargo.toml \
+            -- verify "$payload" "$signature" 1.1.1
+          GITHUB_SHA="$SOURCE_SHA" GITHUB_RUN_NUMBER=1 GITHUB_RUN_ATTEMPT=1 \
+            node .github/scripts/preview-config.mjs
+          node --input-type=module - "$RUNNER_TEMP/gitdesktop-preview.json" <<'JS'
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+          const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
+          assert.equal(config.version, "1.0.1");
+          assert.equal(config.identifier, "com.thebguy.gitdesktop.preview.staging");
+          assert.equal(config.bundle.createUpdaterArtifacts, false);
+          assert.equal(config.plugins.updater.requireSignedVersion, true);
+          assert.deepEqual(config.plugins.updater.endpoints,
+            [process.env.GITDESKTOP_PREVIEW_STAGING_ENDPOINT]);
+          JS
+          pnpm tauri build --bundles dmg --target universal-apple-darwin \
+            --config "$RUNNER_TEMP/gitdesktop-preview.json"
+          shopt -s nullglob
+          images=(src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          hdiutil verify "${images[0]}"
+          mountpoint=$(mktemp -d "$RUNNER_TEMP/gd-handoff-mount.XXXXXX")
+          trap 'hdiutil detach "$mountpoint" >/dev/null' EXIT
+          hdiutil attach "${images[0]}" -readonly -nobrowse -mountpoint "$mountpoint"
+          apps=("$mountpoint"/*.app)
+          test "${#apps[@]}" -eq 1
+          plist="${apps[0]}/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = '1.0.1'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = 'com.thebguy.gitdesktop.preview.staging'
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")
+          [[ -n "$executable" && "$executable" != */* ]]
+          lipo "${apps[0]}/Contents/MacOS/$executable" -verify_arch x86_64 arm64
+          hdiutil detach "$mountpoint"
+          trap - EXIT
+          rmdir "$mountpoint"
+          out="$RUNNER_TEMP/handoff-artifact"
+          mkdir "$out"
+          cp "${images[0]}" "$out/GitDesktop-Preview-Staging-A-macos-universal.dmg"
+          cp "$RUNNER_TEMP/gitdesktop-preview-build.json" "$out/BUILD.json"
+          (cd "$out" && shasum -a 256 *.dmg > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: GitDesktop-macOS-handoff-A-31371e9
+          path: ${{ runner.temp }}/handoff-artifact/
+          if-no-files-found: error
+          retention-days: 3
