@@ -12,6 +12,15 @@ export VITE_GITDESKTOP_PREVIEW_UPDATES=1
 umask 077
 scratch=$(mktemp -d "$RUNNER_TEMP/gd-mac-stage.XXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
+verify_universal() {
+  lipo "$1" -verify_arch x86_64 arm64
+}
+# Make sure the runner accepts the architecture check before the long builds.
+printf 'int gd_preview_lipo_probe(void) { return 0; }\n' > "$scratch/lipo-probe.c"
+xcrun clang -arch x86_64 -c "$scratch/lipo-probe.c" -o "$scratch/lipo-x86_64.o"
+xcrun clang -arch arm64 -c "$scratch/lipo-probe.c" -o "$scratch/lipo-arm64.o"
+lipo -create "$scratch/lipo-x86_64.o" "$scratch/lipo-arm64.o" -output "$scratch/lipo-probe.o"
+verify_universal "$scratch/lipo-probe.o"
 out="$RUNNER_TEMP/gd-mac-stage-assets"
 mkdir "$out"
 unset TAURI_SIGNING_PRIVATE_KEY
@@ -33,7 +42,7 @@ inspect_image() (
   test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${apps[0]}/Contents/Info.plist")" = "$version"
   executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${apps[0]}/Contents/Info.plist")
   [[ -n "$executable" && "$executable" != */* ]]
-  lipo -verify_arch x86_64 arm64 "${apps[0]}/Contents/MacOS/$executable"
+  verify_universal "${apps[0]}/Contents/MacOS/$executable"
   hdiutil detach "$mountpoint"
   trap - EXIT
   rmdir "$mountpoint"
